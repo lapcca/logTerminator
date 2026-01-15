@@ -1,4 +1,4 @@
-mod log_parser;
+pub mod log_parser;
 mod database;
 
 use std::sync::Mutex;
@@ -170,6 +170,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             greet,

@@ -13,8 +13,10 @@
     "windows": [
       {
         "title": "logterminator",
-        "width": 800,
-        "height": 600
+        "width": 1400,
+        "height": 900,
+        "minWidth": 800,
+        "minHeight": 600
       }
     ],
     "security": {
@@ -31,5 +33,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": false
+    }
   }
 }
