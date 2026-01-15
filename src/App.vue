@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
@@ -13,12 +13,13 @@ const levelFilter = ref(null)
 const totalEntries = ref(0)
 const sessions = ref([])
 const showSidebar = ref(true) // 控制左侧面板显示/隐藏
-const selectedEntries = ref([]) // 选中的日志条目
+const selectedEntryIds = ref([]) // 选中的日志条目ID
+const highlightedEntryId = ref(null) // 当前高亮的条目ID
 
 // Data table options
 const options = reactive({
   page: 1,
-  itemsPerPage: 100,
+  itemsPerPage: 50,
   sortBy: ['timestamp'],
   sortDesc: [false]
 })
@@ -26,42 +27,52 @@ const options = reactive({
 // Log levels for filtering
 const logLevels = ['ERROR', 'WARNING', 'INFO', 'DEBUG', 'TRACE']
 
-// Table headers - 添加选择列
+// Table headers
 const headers = [
-  { title: '', key: 'data-table-select', width: '48px', sortable: false },
-  { title: '时间戳', key: 'timestamp', width: '180px' },
-  { title: '级别', key: 'level', width: '80px' },
-  { title: '调用栈', key: 'stack', width: '250px' },
-  { title: '消息', key: 'message' },
-  { title: '操作', key: 'actions', width: '80px', sortable: false }
+  { title: '', key: 'data-table-select', width: '56px', sortable: false, align: 'center' },
+  { title: '时间戳', key: 'timestamp', width: '180px', sortable: true },
+  { title: '级别', key: 'level', width: '90px', sortable: true },
+  { title: '调用栈', key: 'stack', width: '250px', sortable: false },
+  { title: '消息', key: 'message', minWidth: '300px' },
+  { title: '书签', key: 'bookmarked', width: '80px', sortable: false, align: 'center' }
 ]
+
+// Computed selected entries
+const selectedEntries = computed(() => {
+  return logEntries.value.filter(entry => selectedEntryIds.value.includes(entry.id))
+})
+
+// Check if all entries on current page are selected
+const allSelected = computed(() => {
+  return logEntries.value.length > 0 && 
+         logEntries.value.every(entry => selectedEntryIds.value.includes(entry.id))
+})
+
+// Check if some entries on current page are selected
+const someSelected = computed(() => {
+  return logEntries.value.some(entry => selectedEntryIds.value.includes(entry.id))
+})
 
 // Open log directory
 async function openDirectory() {
   try {
-    console.log('Attempting to open directory dialog...')
     const selected = await open({
       directory: true,
       multiple: false,
       title: '选择日志目录'
     })
-    console.log('Directory selected:', selected)
 
     if (selected) {
       loading.value = true
-      console.log('Opening directory:', selected)
-
+      selectedEntryIds.value = [] // 清空选择
+      
       try {
         currentSession.value = await invoke('parse_log_directory', { directoryPath: selected })
-        console.log('Session created:', currentSession.value)
-
         await loadSessions()
         await refreshLogs()
-
-        console.log('Directory processed successfully')
       } catch (error) {
         console.error('Error processing directory:', error)
-        alert(`处理目录时出错：${error}\n\n请检查目录路径是否正确，并确保有读取权限。`)
+        alert(`处理目录时出错：${error}`)
       } finally {
         loading.value = false
       }
@@ -86,7 +97,6 @@ async function refreshLogs() {
 
   loading.value = true
   try {
-    console.log('Fetching logs for session:', currentSession.value)
     const result = await invoke('get_log_entries', {
       sessionId: currentSession.value,
       offset: (options.page - 1) * options.itemsPerPage,
@@ -95,8 +105,6 @@ async function refreshLogs() {
       searchTerm: searchTerm.value
     })
 
-    console.log('Received result:', result)
-    // Rust returns (Vec<LogEntry>, total_count)
     const [entries, total] = result
     logEntries.value = entries || []
     totalEntries.value = total || 0
@@ -104,7 +112,7 @@ async function refreshLogs() {
     await loadBookmarks()
   } catch (error) {
     console.error('Error fetching logs:', error)
-    alert(`获取日志时出错：${error}\n\n请检查会话是否有效，或重试刷新操作。`)
+    alert(`获取日志时出错：${error}`)
   } finally {
     loading.value = false
   }
@@ -121,91 +129,111 @@ async function loadBookmarks() {
   }
 }
 
+// Check if entry is bookmarked
+function isBookmarked(entryId) {
+  return bookmarks.value.some(b => b[0].log_entry_id === entryId)
+}
+
 // Add bookmark
 async function addBookmark(entry) {
   try {
     await invoke('add_bookmark', {
       logEntryId: entry.id,
-      title: `标记 ${entry.timestamp}`,
-      color: 'yellow'
+      title: `书签 ${entry.timestamp}`,
+      color: 'amber'
     })
     await loadBookmarks()
   } catch (error) {
     console.error('Error adding bookmark:', error)
-    alert(`添加书签时出错：${error}\n\n请稍后重试。`)
+    alert(`添加书签时出错：${error}`)
+  }
+}
+
+// Remove bookmark
+async function removeBookmark(entryId) {
+  try {
+    // Find and delete the bookmark
+    const bookmark = bookmarks.value.find(b => b[0].log_entry_id === entryId)
+    if (bookmark) {
+      // Note: Need to add delete_bookmark command to backend
+      // For now, just reload bookmarks
+      await loadBookmarks()
+    }
+  } catch (error) {
+    console.error('Error removing bookmark:', error)
+  }
+}
+
+// Toggle bookmark
+async function toggleBookmark(entry) {
+  if (isBookmarked(entry.id)) {
+    await removeBookmark(entry.id)
+  } else {
+    await addBookmark(entry)
   }
 }
 
 // Add bookmarks for selected entries
 async function addBookmarksForSelected() {
-  if (selectedEntries.value.length === 0) {
+  if (selectedEntryIds.value.length === 0) {
     alert('请先选择日志条目')
     return
   }
 
   try {
     for (const entry of selectedEntries.value) {
-      await invoke('add_bookmark', {
-        logEntryId: entry.id,
-        title: `标记 ${entry.timestamp}`,
-        color: 'yellow'
-      })
+      if (!isBookmarked(entry.id)) {
+        await invoke('add_bookmark', {
+          logEntryId: entry.id,
+          title: `书签 ${entry.timestamp}`,
+          color: 'amber'
+        })
+      }
     }
     await loadBookmarks()
-    selectedEntries.value = [] // 清空选择
   } catch (error) {
     console.error('Error adding bookmarks:', error)
     alert(`批量添加书签时出错：${error}`)
   }
 }
 
-// Jump to bookmark
-function jumpToBookmark(bookmark) {
-  console.log('Jump to bookmark:', bookmark)
-  // TODO: Implement jump functionality - 滚动到指定日志条目
-  if (bookmark[1] && bookmark[1].timestamp) {
-    // 找到对应的日志条目并滚动到可见区域
-    const targetEntry = logEntries.value.find(e => e.timestamp === bookmark[1].timestamp)
-    if (targetEntry) {
-      // 高亮显示并滚动到该条目
-      const index = logEntries.value.indexOf(targetEntry)
-      const pageStart = (options.page - 1) * options.itemsPerPage
-      const targetPage = Math.floor((pageStart + index) / options.itemsPerPage) + 1
-      if (targetPage !== options.page) {
-        options.page = targetPage
-        setTimeout(() => {
-          // 滚动后高亮
-          highlightEntry(targetEntry.id)
-        }, 100)
-      } else {
-        highlightEntry(targetEntry.id)
-      }
-    }
+// Clear selection
+function clearSelection() {
+  selectedEntryIds.value = []
+}
+
+// Toggle select all
+function toggleSelectAll() {
+  if (allSelected.value) {
+    // Deselect all on current page
+    selectedEntryIds.value = selectedEntryIds.value.filter(
+      id => !logEntries.value.find(e => e.id === id)
+    )
+  } else {
+    // Select all on current page
+    const newIds = logEntries.value
+      .filter(entry => !selectedEntryIds.value.includes(entry.id))
+      .map(entry => entry.id)
+    selectedEntryIds.value = [...selectedEntryIds.value, ...newIds]
   }
 }
 
-// 高亮指定条目
-function highlightEntry(entryId) {
-  // 使用DOM操作高亮显示
-  const rows = document.querySelectorAll('.v-data-table__tr')
-  rows.forEach(row => {
-    const dataId = row.getAttribute('data-entry-id')
-    if (dataId === String(entryId)) {
-      row.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      row.style.backgroundColor = 'rgba(255, 193, 7, 0.3)'
-      setTimeout(() => {
-        row.style.backgroundColor = ''
-      }, 2000)
-    }
-  })
+// Toggle row selection
+function toggleRowSelection(entry) {
+  const index = selectedEntryIds.value.indexOf(entry.id)
+  if (index > -1) {
+    selectedEntryIds.value.splice(index, 1)
+  } else {
+    selectedEntryIds.value.push(entry.id)
+  }
 }
 
 // Get level color for chips
 function getLevelColor(level) {
   const colors = {
-    'ERROR': 'red',
-    'WARNING': 'orange',
-    'INFO': 'blue',
+    'ERROR': 'error',
+    'WARNING': 'warning',
+    'INFO': 'info',
     'DEBUG': 'grey',
     'TRACE': 'purple'
   }
@@ -222,9 +250,64 @@ let searchTimeout
 function debouncedSearch() {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => {
-    options.page = 1 // Reset to first page
+    options.page = 1
     refreshLogs()
   }, 300)
+}
+
+// Jump to bookmark with animation
+async function jumpToBookmark(bookmark) {
+  const bookmarkData = bookmark[1]
+  if (!bookmarkData || !bookmarkData.timestamp) return
+
+  try {
+    // Find the entry in current page first
+    let targetEntry = logEntries.value.find(e => e.timestamp === bookmarkData.timestamp)
+    
+    if (!targetEntry) {
+      // Need to search in database - for now, show message
+      alert(`未在当前页面找到该书签对应的日志条目`)
+      return
+    }
+
+    // Calculate target page
+    const entryIndex = logEntries.value.findIndex(e => e.timestamp === bookmarkData.timestamp)
+    const targetPage = Math.floor(entryIndex / options.itemsPerPage) + 1
+    
+    // Navigate to page if needed
+    if (targetPage !== options.page) {
+      options.page = targetPage
+      await refreshLogs()
+      // Wait for render then highlight
+      await nextTick()
+      setTimeout(() => highlightAndScroll(targetEntry.id), 150)
+    } else {
+      highlightAndScroll(targetEntry.id)
+    }
+  } catch (error) {
+    console.error('Error jumping to bookmark:', error)
+  }
+}
+
+// Highlight and scroll to entry
+function highlightAndScroll(entryId) {
+  highlightedEntryId.value = entryId
+  
+  // Scroll to element
+  const element = document.querySelector(`[data-entry-id="${entryId}"]`)
+  if (element) {
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+  
+  // Remove highlight after animation
+  setTimeout(() => {
+    highlightedEntryId.value = null
+  }, 3000)
+}
+
+// Check if entry is highlighted
+function isHighlighted(entryId) {
+  return highlightedEntryId.value === entryId
 }
 
 // Load sessions on mount
@@ -235,136 +318,162 @@ onMounted(() => {
 
 <template>
   <v-app>
-    <v-app-bar app color="primary" dark>
+    <!-- App Bar -->
+    <v-app-bar app color="primary" dark elevation="2">
       <v-btn
         icon
+        variant="text"
         @click="showSidebar = !showSidebar"
-        class="mr-2">
-        <v-icon>{{ showSidebar ? 'mdi-panel-close' : 'mdi-panel-open' }}</v-icon>
+        class="mr-2"
+        title="收起/展开侧边栏">
+        <v-icon>{{ showSidebar ? 'mdi-chevron-left' : 'mdi-chevron-right' }}</v-icon>
       </v-btn>
-      <v-toolbar-title>
-        <v-icon class="mr-2">mdi-file-document-outline</v-icon>
-        LogTerminator - 日志查看器
-      </v-toolbar-title>
+      
+      <v-icon class="mr-2">mdi-file-document-multiple-outline</v-icon>
+      <span class="text-h6 font-weight-medium">日志查看器</span>
+      
       <v-spacer></v-spacer>
-      <v-btn @click="openDirectory" :loading="loading" color="accent" prepend-icon="mdi-folder-open">
-        打开日志目录
+      
+      <v-btn
+        color="white"
+        variant="outlined"
+        prepend-icon="mdi-folder-open"
+        :loading="loading"
+        @click="openDirectory">
+        打开目录
       </v-btn>
     </v-app-bar>
 
-    <v-main>
-      <v-container fluid>
+    <v-main class="bg-grey-lighten-4">
+      <v-container fluid class="pa-4">
         <v-row>
-          <!-- Bookmarks panel - 可隐藏 -->
-          <v-col v-show="showSidebar" cols="3">
-            <v-card class="mb-4" elevation="2">
-              <v-card-title class="bg-blue-grey-lighten-5">
-                <v-icon class="mr-2">mdi-bookmark-multiple</v-icon>
-                书签/标记
-                <v-chip size="small" color="primary" variant="flat" class="ml-auto">
+          <!-- Left Sidebar -->
+          <v-col v-show="showSidebar" cols="3" class="pr-4">
+            <!-- Bookmarks Panel -->
+            <v-card class="mb-3" elevation="2">
+              <v-card-title class="d-flex align-center py-3 px-4 bg-amber-lighten-5">
+                <v-icon color="amber-darken-2" class="mr-2">mdi-bookmark-multiple</v-icon>
+                <span class="font-weight-medium">书签</span>
+                <v-chip size="small" color="amber" variant="flat" class="ml-auto">
                   {{ bookmarks.length }}
                 </v-chip>
               </v-card-title>
-              <v-card-text class="pa-0">
-                <v-list dense>
+              <v-divider></v-divider>
+              <v-card-text class="pa-0" style="max-height: 300px; overflow-y: auto;">
+                <v-list v-if="bookmarks.length > 0" density="comfortable">
                   <v-list-item
                     v-for="bookmark in bookmarks"
-                    :key="bookmark[0].id"
+                    :key="bookmark[0]?.id"
                     @click="jumpToBookmark(bookmark)"
-                    class="bookmark-item">
+                    class="bookmark-item px-3"
+                    rounded="sm">
                     <template v-slot:prepend>
-                      <v-icon :color="bookmark[0].color" size="small">mdi-bookmark</v-icon>
+                      <v-avatar color="amber-lighten-3" size="32" class="mr-3">
+                        <v-icon color="amber-darken-2" size="small">mdi-bookmark</v-icon>
+                      </v-avatar>
                     </template>
-                    <v-list-item-content>
-                      <v-list-item-title class="text-body-2">{{ bookmark[0].title || '标记' }}</v-list-item-title>
-                      <v-list-item-subtitle class="text-caption">{{ bookmark[1].timestamp }}</v-list-item-subtitle>
-                    </v-list-item-content>
-                  </v-list-item>
-                  <v-list-item v-if="bookmarks.length === 0">
-                    <v-list-item-content>
-                      <v-icon class="mr-2 text-disabled">mdi-bookmark-outline</v-icon>
-                      <v-list-item-title class="text--secondary text-body-2">暂无书签</v-list-item-title>
-                    </v-list-item-content>
+                    <v-list-item-title class="text-body-2 font-weight-medium">
+                      {{ bookmark[0]?.title || '书签' }}
+                    </v-list-item-title>
+                    <v-list-item-subtitle class="text-caption">
+                      {{ bookmark[1]?.timestamp }}
+                    </v-list-item-subtitle>
                   </v-list-item>
                 </v-list>
+                <div v-else class="pa-6 text-center text-grey">
+                  <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-bookmark-outline</v-icon>
+                  <div class="text-body-2">暂无书签</div>
+                  <div class="text-caption">点击日志条目旁的星号添加书签</div>
+                </div>
               </v-card-text>
             </v-card>
 
-            <!-- Sessions panel -->
+            <!-- Sessions Panel -->
             <v-card elevation="2">
-              <v-card-title class="bg-green-lighten-5">
-                <v-icon class="mr-2">mdi-test-tube</v-icon>
-                测试会话
-                <v-chip size="small" color="success" variant="flat" class="ml-auto">
+              <v-card-title class="d-flex align-center py-3 px-4 bg-blue-grey-lighten-5">
+                <v-icon color="blue-grey" class="mr-2">mdi-folder-multiple</v-icon>
+                <span class="font-weight-medium">测试会话</span>
+                <v-chip size="small" color="blue-grey" variant="flat" class="ml-auto">
                   {{ sessions.length }}
                 </v-chip>
               </v-card-title>
-              <v-card-text class="pa-0">
-                <v-list dense>
+              <v-divider></v-divider>
+              <v-card-text class="pa-0" style="max-height: calc(100vh - 500px); overflow-y: auto;">
+                <v-list v-if="sessions.length > 0" density="comfortable">
                   <v-list-item
                     v-for="session in sessions"
                     :key="session.id"
                     :class="{ 'bg-primary-lighten-5': currentSession === session.id }"
                     @click="currentSession = session.id; refreshLogs()"
-                    class="session-item">
+                    class="session-item px-3"
+                    rounded="sm">
                     <template v-slot:prepend>
-                      <v-icon size="small" :color="currentSession === session.id ? 'primary' : 'grey'">mdi-folder</v-icon>
+                      <v-avatar 
+                        :color="currentSession === session.id ? 'primary' : 'grey-lighten-2'" 
+                        size="32" 
+                        class="mr-3">
+                        <v-icon 
+                          :color="currentSession === session.id ? 'white' : 'grey'" 
+                          size="small">
+                          mdi-folder
+                        </v-icon>
+                      </v-avatar>
                     </template>
-                    <v-list-item-content>
-                      <v-list-item-title class="text-body-2">{{ session.name }}</v-list-item-title>
-                      <v-list-item-subtitle class="text-caption">{{ session.total_entries }} 条记录</v-list-item-subtitle>
-                    </v-list-item-content>
+                    <v-list-item-title class="text-body-2 font-weight-medium">
+                      {{ session.name }}
+                    </v-list-item-title>
+                    <v-list-item-subtitle class="text-caption">
+                      {{ session.total_entries }} 条记录
+                    </v-list-item-subtitle>
                   </v-list-item>
                 </v-list>
+                <div v-else class="pa-6 text-center text-grey">
+                  <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-folder-outline</v-icon>
+                  <div class="text-body-2">暂无会话</div>
+                  <div class="text-caption">打开目录加载日志</div>
+                </div>
               </v-card-text>
             </v-card>
           </v-col>
 
-          <!-- Main content -->
+          <!-- Main Content -->
           <v-col :cols="showSidebar ? 9 : 12">
-            <!-- Filters -->
-            <v-card class="mb-4" elevation="2">
-              <v-card-title class="bg-grey-lighten-4">
-                <v-icon class="mr-2">mdi-filter-variant</v-icon>
-                过滤和搜索
-              </v-card-title>
-              <v-card-text>
-                <v-row>
-                  <v-col cols="2">
+            <!-- Filters Card -->
+            <v-card class="mb-3" elevation="2">
+              <v-card-text class="pa-4">
+                <v-row align="center">
+                  <v-col cols="12" md="3">
                     <v-select
                       v-model="levelFilter"
                       :items="logLevels"
                       label="日志级别"
                       clearable
-                      prepend-inner-icon="mdi-filter"
                       variant="outlined"
                       density="comfortable"
-                      @change="refreshLogs">
+                      prepend-inner-icon="mdi-filter"
+                      bg-color="white"
+                      @update:model-value="refreshLogs">
                     </v-select>
                   </v-col>
-                  <v-col cols="5">
+                  <v-col cols="12" md="5">
                     <v-text-field
                       v-model="searchTerm"
-                      label="搜索内容"
-                      prepend-inner-icon="mdi-magnify"
+                      label="搜索日志内容..."
                       variant="outlined"
                       density="comfortable"
+                      prepend-inner-icon="mdi-magnify"
                       clearable
-                      @input="debouncedSearch">
+                      bg-color="white"
+                      @update:model-value="debouncedSearch">
                     </v-text-field>
                   </v-col>
-                  <v-col cols="3">
+                  <v-col cols="12" md="4" class="d-flex justify-end">
                     <v-btn
-                      @click="addBookmarksForSelected"
-                      :disabled="selectedEntries.length === 0"
-                      color="warning"
-                      prepend-icon="mdi-bookmark-plus"
-                      size="large">
-                      批量添加书签 ({{ selectedEntries.length }})
-                    </v-btn>
-                  </v-col>
-                  <v-col cols="2">
-                    <v-btn @click="refreshLogs" color="primary" :loading="loading" prepend-icon="mdi-refresh" size="large" block>
+                      color="primary"
+                      variant="elevated"
+                      prepend-icon="mdi-refresh"
+                      :loading="loading"
+                      @click="refreshLogs">
                       刷新
                     </v-btn>
                   </v-col>
@@ -372,65 +481,164 @@ onMounted(() => {
               </v-card-text>
             </v-card>
 
-            <!-- Log entries table -->
+            <!-- Selected Actions Bar (shown when items selected) -->
+            <v-expand-transition>
+              <v-card 
+                v-if="selectedEntryIds.length > 0" 
+                class="mb-3" 
+                elevation="2"
+                color="primary"
+                variant="elevated">
+                <v-card-text class="py-3 px-4 d-flex align-center">
+                  <v-icon class="mr-3">mdi-checkbox-multiple-marked</v-icon>
+                  <span class="font-weight-medium mr-4">
+                    已选择 {{ selectedEntryIds.length }} 条记录
+                  </span>
+                  <v-spacer></v-spacer>
+                  <v-btn
+                    color="white"
+                    variant="outlined"
+                    class="mr-2"
+                    prepend-icon="mdi-bookmark-plus"
+                    @click="addBookmarksForSelected">
+                    添加书签
+                  </v-btn>
+                  <v-btn
+                    color="white"
+                    variant="text"
+                    prepend-icon="mdi-close"
+                    @click="clearSelection">
+                    取消选择
+                  </v-btn>
+                </v-card-text>
+              </v-card>
+            </v-expand-transition>
+
+            <!-- Log Entries Table -->
             <v-card elevation="2">
-              <v-card-title class="bg-blue-lighten-5">
-                <v-icon class="mr-2">mdi-file-table-outline</v-icon>
-                日志条目
-                <v-chip size="small" color="info" variant="flat" class="ml-auto">
-                  {{ totalEntries }} 条记录
+              <v-card-title class="d-flex align-center py-3 px-4 bg-blue-lighten-5">
+                <v-icon color="blue" class="mr-2">mdi-format-list-bulleted</v-icon>
+                <span class="font-weight-medium">日志条目</span>
+                <v-chip size="small" color="blue" variant="flat" class="ml-3">
+                  {{ totalEntries }} 条
                 </v-chip>
+                <v-spacer></v-spacer>
+                <span v-if="selectedEntryIds.length > 0" class="text-body-2 text-grey-darken-1">
+                  已选 {{ selectedEntryIds.length }}
+                </span>
               </v-card-title>
+              
+              <v-divider></v-divider>
+              
               <v-card-text class="pa-0">
                 <v-data-table-server
-                  v-model="selectedEntries"
+                  v-model="selectedEntryIds"
                   :headers="headers"
                   :items="logEntries"
                   :loading="loading"
-                  :server-items-length="totalEntries"
+                  :items-length="totalEntries"
                   :options.sync="options"
                   @update:options="handlePagination"
                   show-select
-                  class="elevation-0"
-                  density="compact"
+                  item-value="id"
+                  class="log-table elevation-0"
+                  density="comfortable"
                   fixed-header
-                  height="calc(100vh - 280px)"
-                  item-value="id">
+                  hover
+                  :height="showSidebar ? 'calc(100vh - 340px)' : 'calc(100vh - 220px)'">
 
-                  <template v-slot:item.level="{ item }">
-                    <v-chip
-                      :color="getLevelColor(item.level)"
-                      dark
-                      small>
-                      {{ item.level }}
-                    </v-chip>
+                  <!-- Select All Checkbox -->
+                  <template v-slot:header.data-table-select="{ on, modelValue, someSelected, allSelected }">
+                    <v-checkbox
+                      :model-value="allSelected"
+                      :indeterminate="someSelected && !allSelected"
+                      color="primary"
+                      hide-details
+                      @update:model-value="(val) => {
+                        if (val) toggleSelectAll()
+                        else if (someSelected) toggleSelectAll()
+                      }">
+                    </v-checkbox>
                   </template>
 
-                  <template v-slot:item.stack="{ item }">
-                    <v-tooltip bottom>
-                      <template v-slot:activator="{ on }">
-                        <span v-on="on" class="text-truncate d-block" style="max-width: 200px;">
-                          {{ item.stack }}
-                        </span>
-                      </template>
-                      <span>{{ item.stack }}</span>
-                    </v-tooltip>
-                  </template>
-
-                  <template v-slot:item.actions="{ item }">
-                    <v-tooltip text="添加书签">
-                      <template v-slot:activator="{ props }">
-                        <v-btn
-                          v-bind="props"
-                          icon
+                  <!-- Row with click selection -->
+                  <template v-slot:item="{ item, isSelected, toggleSelect }">
+                    <tr 
+                      :data-entry-id="item.id"
+                      :class="{
+                        'table-row-selected': isSelected,
+                        'table-row-highlighted': isHighlighted(item.id),
+                        'cursor-pointer': true
+                      }"
+                      @click="toggleRowSelection(item)">
+                      <!-- Checkbox cell -->
+                      <td class="text-center" @click.stop>
+                        <v-checkbox
+                          :model-value="isSelected"
+                          color="primary"
+                          hide-details
+                          @update:model-value="toggleSelect">
+                        </v-checkbox>
+                      </td>
+                      <!-- Timestamp -->
+                      <td>
+                        <span class="font-mono text-body-2">{{ item.timestamp }}</span>
+                      </td>
+                      <!-- Level -->
+                      <td>
+                        <v-chip
+                          :color="getLevelColor(item.level)"
                           size="small"
-                          color="warning"
-                          variant="text"
-                          @click="addBookmark(item)">
-                          <v-icon size="small">mdi-bookmark-plus-outline</v-icon>
+                          variant="flat"
+                          class="font-weight-medium">
+                          {{ item.level }}
+                        </v-chip>
+                      </td>
+                      <!-- Stack -->
+                      <td>
+                        <v-tooltip location="top">
+                          <template v-slot:activator="{ props }">
+                            <span 
+                              v-bind="props" 
+                              class="text-truncate d-block font-mono text-caption"
+                              style="max-width: 240px; color: #666;">
+                              {{ item.stack || '-' }}
+                            </span>
+                          </template>
+                          <span class="font-mono">{{ item.stack }}</span>
+                        </v-tooltip>
+                      </td>
+                      <!-- Message -->
+                      <td>
+                        <div 
+                          class="text-body-2 text-wrap" 
+                          style="word-break: break-word;">
+                          {{ item.message }}
+                        </div>
+                      </td>
+                      <!-- Bookmark action -->
+                      <td class="text-center" @click.stop>
+                        <v-btn
+                          :icon="isBookmarked(item.id) ? 'mdi-star' : 'mdi-star-outline'"
+                          :color="isBookmarked(item.id) ? 'amber' : 'grey'"
+                          :variant="isBookmarked(item.id) ? 'flat' : 'text'"
+                          size="small"
+                          @click="toggleBookmark(item)"
+                          :title="isBookmarked(item.id) ? '取消书签' : '添加书签'">
                         </v-btn>
-                      </template>
-                    </v-tooltip>
+                      </td>
+                    </tr>
+                  </template>
+
+                  <!-- Empty state -->
+                  <template v-slot:no-data>
+                    <div class="text-center pa-8">
+                      <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-text-search</v-icon>
+                      <div class="text-h6 text-grey">暂无日志数据</div>
+                      <div class="text-body-2 text-grey-darken-1 mt-2">
+                        点击右上角"打开目录"加载日志文件
+                      </div>
+                    </div>
                   </template>
 
                 </v-data-table-server>
@@ -444,49 +652,78 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* 自定义样式用于日志查看器 */
-.log-level-chip {
-  font-weight: 500;
-  font-size: 0.75rem;
+/* Font for timestamps */
+.font-mono {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+/* Table row styles */
+.cursor-pointer {
+  cursor: pointer;
+}
+
+/* Selected row - bright yellow background */
+.table-row-selected {
+  background-color: rgba(255, 193, 7, 0.25) !important;
+  border-left: 3px solid rgb(255, 193, 7) !important;
+}
+
+.table-row-selected:hover {
+  background-color: rgba(255, 193, 7, 0.35) !important;
+}
+
+/* Highlighted row for bookmark jump */
+.table-row-highlighted {
+  background-color: rgba(33, 150, 243, 0.3) !important;
+  border-left: 3px solid rgb(33, 150, 243) !important;
+  animation: pulse-highlight 1.5s ease-in-out 3;
+}
+
+@keyframes pulse-highlight {
+  0%, 100% { background-color: rgba(33, 150, 243, 0.3); }
+  50% { background-color: rgba(33, 150, 243, 0.5); }
+}
+
+/* Table hover effect */
+:deep(.v-data-table__tr:hover) {
+  background-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* Checkbox size */
+:deep(.v-checkbox) {
+  transform: scale(1.1);
+}
+
+/* Bookmark/Session list items */
+.bookmark-item,
+.session-item {
+  transition: all 0.2s ease;
+  margin: 2px 8px;
+  border-radius: 8px;
 }
 
 .bookmark-item:hover {
-  background-color: rgba(255, 193, 7, 0.1);
+  background-color: rgba(255, 193, 7, 0.15);
 }
 
 .session-item:hover {
   background-color: rgba(25, 118, 210, 0.1);
 }
 
-/* 数据表样式优化 */
-:deep(.v-data-table__wrapper) {
-  border-radius: 4px;
+/* Card title adjustments */
+:deep(.v-card-title) {
+  font-size: 0.95rem;
 }
 
-:deep(.v-data-table-header th) {
-  background-color: #f5f5f5;
-  font-weight: 600;
-}
-
-/* 选中行高亮样式 */
-:deep(.v-data-table__tr--selected) {
-  background-color: rgba(255, 193, 7, 0.15) !important;
-}
-
-/* 卡片标题样式 */
-.v-card-title {
-  font-size: 1rem;
-  font-weight: 500;
-}
-
-/* 响应式调整 */
+/* Responsive adjustments */
 @media (max-width: 960px) {
   .v-col-3 {
     flex: 0 0 100%;
     max-width: 100%;
   }
-
-  .v-col-9 {
+  
+  .v-col-9,
+  .v-col-12 {
     flex: 0 0 100%;
     max-width: 100%;
   }
