@@ -1,0 +1,264 @@
+use rusqlite::{Connection, params, Result as SqlResult};
+use crate::log_parser::{LogEntry, Bookmark, TestSession};
+
+pub struct DatabaseManager {
+    conn: Connection,
+}
+
+impl DatabaseManager {
+    pub fn new(db_path: &str) -> SqlResult<Self> {
+        let conn = Connection::open(db_path)?;
+        Self::init_tables(&conn)?;
+        Ok(Self { conn })
+    }
+
+    fn init_tables(conn: &Connection) -> SqlResult<()> {
+        // Create test sessions table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS test_sessions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                directory_path TEXT NOT NULL,
+                file_count INTEGER DEFAULT 0,
+                total_entries INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_parsed_at DATETIME
+            )",
+            [],
+        )?;
+
+        // Create log entries table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS log_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                test_session_id TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                file_index INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                level TEXT NOT NULL,
+                stack TEXT NOT NULL,
+                message TEXT NOT NULL,
+                line_number INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (test_session_id) REFERENCES test_sessions(id)
+            )",
+            [],
+        )?;
+
+        // Create bookmarks table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS bookmarks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                log_entry_id INTEGER NOT NULL,
+                title TEXT,
+                notes TEXT,
+                color TEXT DEFAULT 'yellow',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (log_entry_id) REFERENCES log_entries(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        // Create indexes for performance
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_session ON log_entries(test_session_id)", [])?;
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_timestamp ON log_entries(timestamp)", [])?;
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_level ON log_entries(level)", [])?;
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_bookmarks_entry ON bookmarks(log_entry_id)", [])?;
+
+        Ok(())
+    }
+
+    pub fn create_test_session(&self, session: &TestSession) -> SqlResult<String> {
+        self.conn.execute(
+            "INSERT INTO test_sessions (id, name, directory_path, file_count, total_entries, last_parsed_at)
+             VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            params![
+                &session.id,
+                &session.name,
+                &session.directory_path,
+                session.file_count,
+                session.total_entries
+            ],
+        )?;
+        Ok(session.id.clone())
+    }
+
+    pub fn insert_entries(&mut self, entries: &[LogEntry]) -> SqlResult<()> {
+        let tx = self.conn.transaction()?;
+
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO log_entries
+                 (test_session_id, file_path, file_index, timestamp, level, stack, message, line_number)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            )?;
+
+            for entry in entries {
+                stmt.execute(params![
+                    &entry.test_session_id,
+                    &entry.file_path,
+                    &entry.file_index,
+                    &entry.timestamp,
+                    &entry.level,
+                    &entry.stack,
+                    &entry.message,
+                    &entry.line_number
+                ])?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_entries_paginated(
+        &self,
+        session_id: &str,
+        offset: usize,
+        limit: usize,
+        level_filter: Option<&str>,
+        search_term: Option<&str>,
+    ) -> SqlResult<(Vec<LogEntry>, usize)> {
+        // Build query dynamically
+        let mut base_query = "SELECT id, file_path, file_index, timestamp, level, stack, message, line_number
+                             FROM log_entries WHERE test_session_id = ?".to_string();
+
+        let mut where_conditions = Vec::new();
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(session_id)];
+
+        if let Some(level) = level_filter {
+            where_conditions.push("level = ?");
+            params.push(Box::new(level.to_string()));
+        }
+
+        if let Some(search) = search_term {
+            where_conditions.push("(message LIKE ? OR stack LIKE ?)");
+            let search_pattern = format!("%{}%", search);
+            params.push(Box::new(search_pattern.clone()));
+            params.push(Box::new(search_pattern));
+        }
+
+        if !where_conditions.is_empty() {
+            base_query.push_str(" AND ");
+            base_query.push_str(&where_conditions.join(" AND "));
+        }
+
+        // Get total count
+        let count_query = base_query.replace(
+            "SELECT id, file_path, file_index, timestamp, level, stack, message, line_number",
+            "SELECT COUNT(*)"
+        );
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let total: usize = self.conn.query_row(&count_query, &param_refs[..], |row| row.get(0))?;
+
+        // Add pagination
+        let mut query = base_query;
+        query.push_str(" ORDER BY timestamp ASC LIMIT ? OFFSET ?");
+        params.push(Box::new(limit));
+        params.push(Box::new(offset));
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = self.conn.prepare(&query)?;
+        let entry_iter = stmt.query_map(&param_refs[..], |row| {
+            Ok(LogEntry {
+                id: Some(row.get(0)?),
+                test_session_id: session_id.to_string(),
+                file_path: row.get(1)?,
+                file_index: row.get(2)?,
+                timestamp: row.get(3)?,
+                level: row.get(4)?,
+                stack: row.get(5)?,
+                message: row.get(6)?,
+                line_number: row.get(7)?,
+                created_at: None,
+            })
+        })?;
+
+        let entries: Result<Vec<_>, _> = entry_iter.collect();
+        Ok((entries?, total))
+    }
+
+    pub fn add_bookmark(&self, bookmark: &Bookmark) -> SqlResult<i64> {
+        self.conn.execute(
+            "INSERT INTO bookmarks (log_entry_id, title, notes, color)
+             VALUES (?, ?, ?, ?)",
+            params![
+                &bookmark.log_entry_id,
+                &bookmark.title,
+                &bookmark.notes,
+                &bookmark.color,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_bookmarks(&self, session_id: &str) -> SqlResult<Vec<(Bookmark, LogEntry)>> {
+        let query = "
+            SELECT b.id, b.log_entry_id, b.title, b.notes, b.color, b.created_at,
+                   e.timestamp, e.level, e.stack, e.message
+            FROM bookmarks b
+            JOIN log_entries e ON b.log_entry_id = e.id
+            WHERE e.test_session_id = ?
+            ORDER BY b.created_at DESC
+        ";
+
+        let mut stmt = self.conn.prepare(query)?;
+        let bookmark_iter = stmt.query_map([session_id], |row| {
+            let bookmark = Bookmark {
+                id: Some(row.get(0)?),
+                log_entry_id: row.get(1)?,
+                title: row.get(2)?,
+                notes: row.get(3)?,
+                color: row.get(4)?,
+                created_at: None,
+            };
+
+            let entry = LogEntry {
+                id: Some(row.get(1)?), // log_entry_id
+                test_session_id: session_id.to_string(),
+                file_path: "".to_string(), // Not needed for bookmark display
+                file_index: 0,
+                timestamp: row.get(5)?,
+                level: row.get(6)?,
+                stack: row.get(7)?,
+                message: row.get(8)?,
+                line_number: 0,
+                created_at: None,
+            };
+
+            Ok((bookmark, entry))
+        })?;
+
+        bookmark_iter.collect()
+    }
+
+    pub fn get_sessions(&self) -> SqlResult<Vec<TestSession>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, name, directory_path, file_count, total_entries, created_at, last_parsed_at
+             FROM test_sessions ORDER BY last_parsed_at DESC"
+        )?;
+
+        let session_iter = stmt.query_map([], |row| {
+            Ok(TestSession {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                directory_path: row.get(2)?,
+                file_count: row.get(3)?,
+                total_entries: row.get(4)?,
+                created_at: None,
+                last_parsed_at: None,
+            })
+        })?;
+
+        session_iter.collect()
+    }
+
+    pub fn delete_session(&self, session_id: &str) -> SqlResult<()> {
+        // Delete in correct order due to foreign key constraints
+        self.conn.execute("DELETE FROM bookmarks WHERE log_entry_id IN (SELECT id FROM log_entries WHERE test_session_id = ?)", [session_id])?;
+        self.conn.execute("DELETE FROM log_entries WHERE test_session_id = ?", [session_id])?;
+        self.conn.execute("DELETE FROM test_sessions WHERE id = ?", [session_id])?;
+        Ok(())
+    }
+}
