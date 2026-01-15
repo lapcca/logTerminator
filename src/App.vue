@@ -333,14 +333,16 @@ onMounted(() => {
     <v-app-bar app color="primary" dark elevation="2">
       <v-btn
         icon
-        variant="text"
+        variant="tonal"
+        size="large"
         @click="showSidebar = !showSidebar"
         class="mr-3"
-        :title="showSidebar ? '收起左侧面板' : '展开左侧面板'">
-        <v-icon size="24">{{ showSidebar ? 'mdi-arrow-collapse-horizontal' : 'mdi-arrow-expand-horizontal' }}</v-icon>
+        :title="showSidebar ? '收起左侧面板' : '展开左侧面板'"
+        style="background: rgba(255,255,255,0.15);">
+        <v-icon size="28">{{ showSidebar ? 'mdi-arrow-collapse-horizontal' : 'mdi-arrow-expand-horizontal' }}</v-icon>
       </v-btn>
       
-      <v-icon class="mr-2">mdi-file-document-multiple-outline</v-icon>
+      <v-icon class="mr-2" size="28">mdi-file-document-multiple-outline</v-icon>
       <span class="text-h6 font-weight-medium">日志查看器</span>
       
       <v-spacer></v-spacer>
