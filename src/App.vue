@@ -335,9 +335,9 @@ onMounted(() => {
         icon
         variant="text"
         @click="showSidebar = !showSidebar"
-        class="mr-2"
-        title="收起/展开侧边栏">
-        <v-icon>{{ showSidebar ? 'mdi-chevron-left' : 'mdi-chevron-right' }}</v-icon>
+        class="mr-3"
+        :title="showSidebar ? '收起左侧面板' : '展开左侧面板'">
+        <v-icon size="24">{{ showSidebar ? 'mdi-arrow-collapse-horizontal' : 'mdi-arrow-expand-horizontal' }}</v-icon>
       </v-btn>
       
       <v-icon class="mr-2">mdi-file-document-multiple-outline</v-icon>
@@ -359,8 +359,9 @@ onMounted(() => {
       <v-container fluid class="pa-4">
         <v-row>
           <!-- Left Sidebar -->
-          <v-col v-show="showSidebar" cols="3" class="pr-4">
-            <!-- Bookmarks Panel -->
+          <v-expand-x-transition>
+            <v-col v-if="showSidebar" cols="3" class="pr-4">
+              <!-- Bookmarks Panel -->
             <v-card class="mb-3" elevation="2">
               <v-card-title class="d-flex align-center py-2 px-4 bg-amber-lighten-5">
                 <v-btn
@@ -476,6 +477,7 @@ onMounted(() => {
               </v-expand-transition>
             </v-card>
           </v-col>
+          </v-expand-x-transition>
 
           <!-- Main Content -->
           <v-col :cols="showSidebar ? 9 : 12">
