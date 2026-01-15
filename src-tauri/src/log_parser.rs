@@ -53,20 +53,40 @@ impl HtmlLogParser {
 
         // Select table rows
         let row_selector = Selector::parse("table tr").unwrap();
-        let cell_selector = Selector::parse("td").unwrap();
+        
+        // Selectors for the log entry structure
+        let stack_selector = Selector::parse("td.stack[hidden]").unwrap();
+        let hierarchy_selector = Selector::parse("td.hierarchy button").unwrap();
 
         let mut entries = Vec::new();
         let mut line_number = 0;
 
         for row in document.select(&row_selector) {
+            // Try to find the stack trace in a hidden td with class="stack"
+            let stack_text = row.select(&stack_selector)
+                .next()
+                .map(|el| el.text().collect::<String>().trim().to_string())
+                .unwrap_or_default();
+
+            // Get the hierarchy button text (file path)
+            let hierarchy_text = row.select(&hierarchy_selector)
+                .next()
+                .map(|el| el.text().collect::<String>().trim().to_string())
+                .unwrap_or_default();
+
+            // Try to get all text content from the row (fallback)
+            let _all_text: Vec<String> = row.text().map(|s| s.trim().to_string()).collect();
+
+            // Extract cells using direct children tds
+            let cell_selector = Selector::parse("> td").unwrap();
             let cells: Vec<_> = row.select(&cell_selector).collect();
 
-            // Skip header row and ensure we have exactly 4 cells
-            if cells.len() == 4 {
+            // Skip header row and ensure we have enough cells
+            // Structure: timestamp, level, (stack/hierarchy), message
+            if cells.len() >= 4 {
                 let timestamp_text = cells[0].text().collect::<String>().trim().to_string();
                 let level_text = cells[1].text().collect::<String>().trim().to_string();
-                let stack_text = cells[2].text().collect::<String>().trim().to_string();
-                let message_text = cells[3].text().collect::<String>().trim().to_string();
+                let message_text = cells[cells.len() - 1].text().collect::<String>().trim().to_string();
 
                 // Skip empty rows or header rows
                 if !timestamp_text.is_empty() && !level_text.is_empty() {
@@ -77,7 +97,7 @@ impl HtmlLogParser {
                         file_index,
                         timestamp: timestamp_text,
                         level: level_text,
-                        stack: stack_text,
+                        stack: if !stack_text.is_empty() { stack_text } else { hierarchy_text },
                         message: message_text,
                         line_number,
                         created_at: Some(Utc::now()),

@@ -660,12 +660,44 @@ onMounted(() => {
                   :options.sync="options"
                   @update:options="handlePagination"
                   show-select
+                  show-pagination
                   item-value="id"
                   class="log-table elevation-0"
                   density="comfortable"
                   fixed-header
                   hover
                   :height="showSidebar ? 'calc(100vh - 340px)' : 'calc(100vh - 220px)'">
+
+                  <!-- Pagination info slot -->
+                  <template v-slot:bottom="{ page, pageCount, prevPage, nextPage, setPage }">
+                    <div class="d-flex align-center justify-center pa-3" style="width: 100%;">
+                      <v-btn
+                        icon
+                        variant="text"
+                        size="small"
+                        :disabled="page === 1"
+                        @click="prevPage"
+                        class="mr-2">
+                        <v-icon>mdi-chevron-left</v-icon>
+                      </v-btn>
+                      <span class="text-body-2 mx-3">
+                        第 {{ page }} / {{ pageCount }} 页
+                      </span>
+                      <v-btn
+                        icon
+                        variant="text"
+                        size="small"
+                        :disabled="page === pageCount"
+                        @click="nextPage"
+                        class="mr-4">
+                        <v-icon>mdi-chevron-right</v-icon>
+                      </v-btn>
+                      <v-divider vertical class="mx-2"></v-divider>
+                      <span class="text-body-2 text-grey">
+                        共 {{ totalEntries }} 条记录
+                      </span>
+                    </div>
+                  </template>
 
                   <!-- Select All Checkbox -->
                   <template v-slot:header.data-table-select="{ on, modelValue, someSelected, allSelected }">
