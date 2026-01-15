@@ -17,13 +17,12 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-// Parse log directory and create test session
-#[tauri::command]
-async fn parse_log_directory(
-    state: State<'_, AppState>,
+// Helper function to do the actual parsing work (can run in blocking thread pool)
+fn parse_directory_blocking(
+    db_path: String,
     directory_path: String,
-) -> Result<String, String> {
-    println!("Parsing log directory: {}", directory_path);
+) -> Result<(String, usize, usize), String> {
+    println!("[BLOCKING] Starting to parse: {}", directory_path);
 
     // Generate session ID
     let session_id = format!("session_{}", chrono::Utc::now().timestamp());
@@ -36,14 +35,14 @@ async fn parse_log_directory(
         return Err("No HTML log files found in the directory".to_string());
     }
 
-    println!("Found {} HTML files, starting parsing...", html_files.len());
+    println!("[BLOCKING] Found {} HTML files", html_files.len());
 
     // Parse all files
     let mut all_entries = Vec::new();
     let mut total_entries = 0;
 
     for (index, file_path) in html_files.iter().enumerate() {
-        println!("Processing file {} of {}: {}", index + 1, html_files.len(), file_path);
+        println!("[BLOCKING] Processing file {} of {}: {}", index + 1, html_files.len(), file_path);
         
         match HtmlLogParser::parse_file(file_path, &session_id, index) {
             Ok(entries) => {
@@ -60,7 +59,7 @@ async fn parse_log_directory(
         return Err("No valid log entries found in the HTML files".to_string());
     }
 
-    println!("Parsed {} entries, saving to database...", total_entries);
+    println!("[BLOCKING] Parsed {} entries, saving to database...", total_entries);
 
     // Create test session
     let session = TestSession {
@@ -70,24 +69,49 @@ async fn parse_log_directory(
             .and_then(|n| n.to_str())
             .unwrap_or("Unknown Session")
             .to_string(),
-        directory_path,
+        directory_path: directory_path.clone(),
         file_count: html_files.len(),
         total_entries,
         created_at: Some(chrono::Utc::now()),
         last_parsed_at: Some(chrono::Utc::now()),
     };
 
-    // Save to database
-    let mut db_manager = state.db_manager.lock().unwrap();
+    // Initialize database and save
+    let mut db_manager = DatabaseManager::new(&db_path)
+        .map_err(|e| format!("Failed to initialize database: {}", e))?;
+    
     db_manager.create_test_session(&session)
         .map_err(|e| format!("Failed to create session: {}", e))?;
 
     db_manager.insert_entries(&all_entries)
         .map_err(|e| format!("Failed to insert entries: {}", e))?;
 
-    println!("Successfully parsed {} files with {} total entries", html_files.len(), total_entries);
+    println!("[BLOCKING] Successfully completed: {} files, {} entries", html_files.len(), total_entries);
 
-    Ok(session_id)
+    Ok((session_id, html_files.len(), total_entries))
+}
+
+// Parse log directory and create test session
+#[tauri::command]
+async fn parse_log_directory(
+    _state: State<'_, AppState>,
+    directory_path: String,
+) -> Result<String, String> {
+    println!("Starting async parse for: {}", directory_path);
+    
+    let db_path = "logterminator.db".to_string();
+    
+    println!("Spawning blocking task...");
+    
+    // Run blocking work in thread pool
+    let result = tokio::task::spawn_blocking(move || {
+        parse_directory_blocking(db_path, directory_path)
+    }).await
+    .map_err(|e| format!("Task failed: {:?}", e))?;
+    
+    println!("Blocking task completed successfully");
+    
+    result.map(|(session_id, _, _)| session_id)
 }
 
 // Get paginated log entries
