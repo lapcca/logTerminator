@@ -8,6 +8,7 @@ const currentSession = ref('')
 const logEntries = ref([])
 const bookmarks = ref([])
 const loading = ref(false)
+const loadingMessage = ref('') // 显示加载状态信息
 const searchTerm = ref('')
 const levelFilter = ref(null)
 const totalEntries = ref(0)
@@ -84,17 +85,23 @@ async function openDirectory() {
 
     if (selected) {
       loading.value = true
+      loadingMessage.value = '正在扫描目录...'
       selectedEntryIds.value = [] // 清空选择
       
       try {
         currentSession.value = await invoke('parse_log_directory', { directoryPath: selected })
+        loadingMessage.value = '加载完成！'
         await loadSessions()
         await refreshLogs()
       } catch (error) {
         console.error('Error processing directory:', error)
+        loadingMessage.value = ''
         alert(`处理目录时出错：${error}`)
       } finally {
-        loading.value = false
+        setTimeout(() => {
+          loading.value = false
+          loadingMessage.value = ''
+        }, 500)
       }
     }
   } catch (error) {
@@ -387,6 +394,16 @@ onMounted(() => {
       <span class="text-h6 font-weight-medium">日志查看器</span>
       
       <v-spacer></v-spacer>
+      
+      <!-- Loading indicator -->
+      <v-progress-linear
+        v-if="loading"
+        indeterminate
+        color="white"
+        class="mr-4"
+        style="width: 200px;">
+      </v-progress-linear>
+      <span v-if="loadingMessage" class="text-body-2 mr-4 text-white">{{ loadingMessage }}</span>
       
       <v-btn
         color="white"

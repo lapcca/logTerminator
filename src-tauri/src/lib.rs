@@ -36,12 +36,15 @@ async fn parse_log_directory(
         return Err("No HTML log files found in the directory".to_string());
     }
 
+    println!("Found {} HTML files, starting parsing...", html_files.len());
+
     // Parse all files
     let mut all_entries = Vec::new();
     let mut total_entries = 0;
 
     for (index, file_path) in html_files.iter().enumerate() {
-        println!("Processing file {}: {}", index + 1, file_path);
+        println!("Processing file {} of {}: {}", index + 1, html_files.len(), file_path);
+        
         match HtmlLogParser::parse_file(file_path, &session_id, index) {
             Ok(entries) => {
                 total_entries += entries.len();
@@ -49,7 +52,6 @@ async fn parse_log_directory(
             }
             Err(e) => {
                 println!("Warning: Failed to parse {}: {}", file_path, e);
-                // Continue with other files
             }
         }
     }
@@ -57,6 +59,8 @@ async fn parse_log_directory(
     if all_entries.is_empty() {
         return Err("No valid log entries found in the HTML files".to_string());
     }
+
+    println!("Parsed {} entries, saving to database...", total_entries);
 
     // Create test session
     let session = TestSession {
