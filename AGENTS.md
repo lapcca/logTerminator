@@ -1,6 +1,6 @@
-# Agent Instructions for logTerminator
+# logTerminator Agent Instructions
 
-This document provides comprehensive guidelines for agentic coding agents working on the logTerminator project, a Tauri desktop application with Vue.js frontend and Rust backend.
+This document provides comprehensive guidance for coding agents working in the logTerminator project, a Tauri desktop application combining a Vue.js frontend with a Rust backend.
 
 ## Project Overview
 
@@ -9,10 +9,12 @@ logTerminator is a Tauri application that combines:
 - **Backend**: Rust with Tauri framework
 - **Build System**: Vite for frontend, Cargo for Rust
 - **Package Manager**: pnpm
+- **Database**: SQLite with Rusqlite
+- **Purpose**: Log file analyzer for HTML-based test logs with bookmarking capabilities
 
 ## Build, Lint, and Test Commands
 
-### Frontend (Vue.js/Vite)
+### Vue.js/Vite Frontend
 ```bash
 # Development server
 pnpm dev
@@ -29,13 +31,13 @@ pnpm preview
 # Development mode (runs both frontend and backend)
 pnpm tauri dev
 
-# Production build (creates installers)
+# Production build (creates installer)
 pnpm tauri build
 
-# Bundle only (after building)
+# Bundle only (after build)
 pnpm tauri bundle
 
-# Show environment information
+# Show environment info
 pnpm tauri info
 ```
 
@@ -45,12 +47,12 @@ pnpm tauri info
 cd src-tauri && cargo test
 
 # Run specific test
-cd src-tauri && cargo test test_name
+cd src-tauri && cargo test test_function_name
 
 # Run tests with output
 cd src-tauri && cargo test -- --nocapture
 
-# Lint with Clippy
+# Clippy checks
 cd src-tauri && cargo clippy
 
 # Auto-fix Clippy suggestions
@@ -59,19 +61,18 @@ cd src-tauri && cargo clippy --fix
 # Format code
 cd src-tauri && cargo fmt
 
-# Check formatting without changes
+# Check formatting (no changes)
 cd src-tauri && cargo fmt --check
 
-# Build in release mode
+# Release mode build
 cd src-tauri && cargo build --release
 
-# Build debug mode
+# Debug mode build
 cd src-tauri && cargo build
 ```
 
-### Running Single Tests
+### Running Individual Tests
 - **Rust**: `cd src-tauri && cargo test test_function_name`
-- **No JavaScript/Vue tests configured** - add test frameworks if needed
 
 ## Code Style Guidelines
 
@@ -80,16 +81,16 @@ cd src-tauri && cargo build
 #### File Structure
 ```
 src/
-├── main.js          # App entry point with Vuetify setup
+├── main.js          # Application entry point, Vuetify setup
 ├── App.vue          # Root component
-└── assets/          # Static assets
+└── assets/          # Static resources
 ```
 
 #### Component Style
 - Use Vue 3 Composition API with `<script setup>` syntax
 - Import Vue functions from 'vue': `import { ref, computed } from 'vue'`
 - Use single-file components (.vue files)
-- Template, script, and style sections in that order
+- Order: template, script, then styles
 
 #### Imports
 ```javascript
@@ -98,8 +99,9 @@ import { ref, computed, onMounted } from 'vue'
 
 // Third-party libraries
 import { invoke } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 
-// Local components/assets
+// Local components/resources
 import SomeComponent from './components/SomeComponent.vue'
 ```
 
@@ -110,7 +112,7 @@ import SomeComponent from './components/SomeComponent.vue'
 - **Files**: kebab-case for components (my-component.vue)
 
 #### Templates
-- Use kebab-case for HTML attributes: `v-model`, `@click`, `:class`
+- HTML attributes use kebab-case: `v-model`, `@click`, `:class`
 - Use shorthand for common directives: `@` for `v-on:`, `:` for `v-bind:`
 - Consistent indentation (2 spaces)
 
@@ -126,12 +128,12 @@ const computedValue = computed(() => myData.value.toUpperCase())
 
 // Functions
 function handleSubmit() {
-  // Implementation
+  // implementation
 }
 
 // Lifecycle hooks
 onMounted(() => {
-  // Initialization
+  // initialization
 })
 </script>
 ```
@@ -139,8 +141,8 @@ onMounted(() => {
 #### Styles
 - Use scoped styles: `<style scoped>`
 - CSS custom properties for theming
-- Follow BEM-like naming when needed
-- Responsive design with CSS Grid/Flexbox
+- Follow BEM naming when needed
+- Use CSS Grid/Flexbox for responsive design
 
 ### Rust Backend
 
@@ -149,8 +151,11 @@ onMounted(() => {
 src-tauri/
 ├── src/
 │   ├── main.rs       # Application entry point
-│   ├── lib.rs        # Library with Tauri commands
-│   └── [other modules]
+│   ├── lib.rs        # Tauri command library
+│   ├── log_parser.rs # HTML log parsing logic
+│   └── database.rs   # SQLite database operations
+├── tests/
+│   └── log_parser_tests.rs # Unit tests
 ├── Cargo.toml        # Rust dependencies
 └── tauri.conf.json   # Tauri configuration
 ```
@@ -158,15 +163,15 @@ src-tauri/
 #### Code Style
 - Follow standard Rust formatting (enforced by `cargo fmt`)
 - Use `cargo clippy` for linting
-- 4 spaces indentation (default rustfmt)
-- 100 character line width (default)
+- 4-space indentation (rustfmt default)
+- 100-character line width (default)
 
 #### Tauri Commands
 ```rust
 // Command definition
 #[tauri::command]
 fn my_command(name: &str) -> Result<String, String> {
-    // Implementation
+    // implementation
     Ok(format!("Hello, {}!", name))
 }
 
@@ -175,10 +180,10 @@ fn my_command(name: &str) -> Result<String, String> {
 ```
 
 #### Error Handling
-- Use `Result<T, E>` for fallible operations
-- Custom error types when appropriate
-- Proper error propagation with `?` operator
-- Meaningful error messages
+- Use `Result<T, E>` for operations that can fail
+- Use appropriate custom error types
+- Use `?` operator for proper error propagation
+- Provide meaningful error messages
 
 #### Naming Conventions
 - **Functions/Methods**: snake_case (my_function)
@@ -203,7 +208,7 @@ use my_module::MyStruct;
 
 #### Documentation
 - Use `///` for public API documentation
-- Include examples when helpful
+- Include examples when necessary
 - Document safety requirements for unsafe code
 
 ## Development Workflow
@@ -212,7 +217,7 @@ use my_module::MyStruct;
 
 1. **Frontend Changes**:
    ```bash
-   # Start dev server
+   # Start development server
    pnpm dev
    # Make changes, test in browser
    ```
@@ -223,7 +228,7 @@ use my_module::MyStruct;
    cd src-tauri && cargo test
    cd src-tauri && cargo clippy
 
-   # Run full app
+   # Run full application
    pnpm tauri dev
    ```
 
@@ -239,7 +244,7 @@ use my_module::MyStruct;
 
 ### Debugging
 
-- **Frontend**: Use browser dev tools (F12)
+- **Frontend**: Use browser developer tools (F12)
 - **Backend**: Use `println!` or `dbg!` macros, check logs in terminal
 - **Full App**: Use `pnpm tauri dev` for integrated debugging
 
@@ -247,28 +252,42 @@ use my_module::MyStruct;
 
 ### Frontend
 - Vue 3: Reactive UI framework
-- Vuetify: Material Design component library
+- Vuetify 3: Material Design component library
 - Vite: Fast build tool and dev server
-- Tauri API: Communication with Rust backend
+- Tauri APIs: Communication with Rust backend
+- @tauri-apps/plugin-dialog: File/directory picker
+- @tauri-apps/plugin-opener: Open files/URLs
 
 ### Backend
 - Tauri: Desktop application framework
+- Rusqlite: SQLite database bindings (with bundled SQLite)
+- Scraper: HTML parsing and CSS selectors
+- Tokio: Asynchronous runtime
+- Chrono: Date/time handling with serde support
+- Walkdir: Directory traversal utilities
 - Serde: Serialization/deserialization
-- Tauri Plugin Opener: File opening capabilities
 
 ## Security Considerations
 
-- Validate all inputs from frontend to backend
+- Validate all inputs between frontend and backend
 - Use Tauri's security model (capabilities, permissions)
-- Avoid exposing sensitive operations via Tauri commands
+- Avoid exposing sensitive operations through Tauri commands
 - Follow Rust's memory safety guarantees
 
 ## Performance Guidelines
 
 - Minimize Tauri command calls (batch operations when possible)
-- Use Vue's reactivity system efficiently
-- Optimize bundle size (tree shaking enabled by default)
-- Profile with browser dev tools and Rust profilers
+- Use Vue's reactive system efficiently
+- Optimize bundle size (tree-shaking enabled by default)
+- Use browser dev tools and Rust profilers for analysis
+
+## Editor Configuration
+
+### Cursor Rules
+No Cursor-specific rules found (.cursor/rules/ or .cursorrules).
+
+### Copilot Rules
+No Copilot-specific rules found (.github/copilot-instructions.md).
 
 ## File References
 

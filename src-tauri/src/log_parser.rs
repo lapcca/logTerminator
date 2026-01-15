@@ -1,6 +1,7 @@
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
@@ -92,8 +93,6 @@ impl HtmlLogParser {
     }
 
     pub fn scan_html_files(directory_path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        use walkdir::WalkDir;
-
         let mut html_files = Vec::new();
 
         for entry in WalkDir::new(directory_path).into_iter().filter_map(|e| e.ok()) {
@@ -120,7 +119,7 @@ impl HtmlLogParser {
         Ok(html_files)
     }
 
-    fn extract_file_index(file_path: &str) -> usize {
+    pub fn extract_file_index(file_path: &str) -> usize {
         use std::path::Path;
 
         if let Some(filename) = Path::new(file_path).file_name() {
@@ -136,58 +135,5 @@ impl HtmlLogParser {
             }
         }
         0
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_file_index() {
-        assert_eq!(HtmlLogParser::extract_file_index("TestEnableTcpdump_ID_1---0.html"), 0);
-        assert_eq!(HtmlLogParser::extract_file_index("TestEnableTcpdump_ID_1---10.html"), 10);
-        assert_eq!(HtmlLogParser::extract_file_index("test---5.html"), 5);
-        assert_eq!(HtmlLogParser::extract_file_index("no_index.html"), 0);
-    }
-
-    #[test]
-    fn test_parse_simple_html() {
-        let html = r#"
-        <!DOCTYPE html>
-        <html>
-        <body>
-        <table>
-        <tr class="HEADER">
-            <th>Timestamp</th>
-            <th>Level</th>
-            <th>Stack</th>
-            <th>Message</th>
-        </tr>
-        <tr class="INFO">
-            <td class="date">2026/01/14 07:17:37,370 UTC</td>
-            <td class="level">[INFO]</td>
-            <td class="hierarchy">Thread: &lt;MainThread&gt;</td>
-            <td class="message"><pre class="INFO">Test message</pre></td>
-        </tr>
-        </table>
-        </body>
-        </html>
-        "#;
-
-        // Write to temp file
-        std::fs::write("test_temp.html", html).expect("Failed to write test file");
-
-        let result = HtmlLogParser::parse_file("test_temp.html", "test_session", 0);
-
-        // Clean up
-        let _ = std::fs::remove_file("test_temp.html");
-
-        assert!(result.is_ok());
-        let entries = result.unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].level, "[INFO]");
-        assert_eq!(entries[0].timestamp, "2026/01/14 07:17:37,370 UTC");
-        assert!(entries[0].message.contains("Test message"));
     }
 }
