@@ -157,6 +157,14 @@ fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), 
         .map_err(|e| format!("Failed to delete session: {}", e))
 }
 
+// Delete bookmark
+#[tauri::command]
+fn delete_bookmark(state: State<'_, AppState>, bookmark_id: i64) -> Result<(), String> {
+    let db_manager = state.db_manager.lock().unwrap();
+    db_manager.delete_bookmark(bookmark_id)
+        .map_err(|e| format!("Failed to delete bookmark: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize database
@@ -178,6 +186,7 @@ pub fn run() {
             get_log_entries,
             add_bookmark,
             get_bookmarks,
+            delete_bookmark,
             get_sessions,
             delete_session
         ])

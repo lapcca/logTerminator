@@ -35,6 +35,15 @@ const options = reactive({
   sortDesc: [false]
 })
 
+// Items per page options
+const itemsPerPageOptions = [
+  { title: '25 条/页', value: 25 },
+  { title: '50 条/页', value: 50 },
+  { title: '100 条/页', value: 100 },
+  { title: '200 条/页', value: 200 },
+  { title: '500 条/页', value: 500 },
+]
+
 // Log levels for filtering
 const logLevels = ['ERROR', 'WARNING', 'INFO', 'DEBUG', 'TRACE']
 
@@ -102,6 +111,28 @@ async function loadSessions() {
   }
 }
 
+// Delete test session
+async function deleteSession(sessionId) {
+  if (!confirm('确定要删除此测试会话及其所有日志吗？此操作不可撤销。')) {
+    return
+  }
+  
+  try {
+    await invoke('delete_session', { sessionId })
+    // If deleting current session, clear it
+    if (currentSession.value === sessionId) {
+      currentSession.value = ''
+      logEntries.value = []
+      totalEntries.value = 0
+      bookmarks.value = []
+    }
+    await loadSessions()
+  } catch (error) {
+    console.error('Error deleting session:', error)
+    alert(`删除会话时出错：${error}`)
+  }
+}
+
 // Refresh log entries
 async function refreshLogs() {
   if (!currentSession.value) return
@@ -160,18 +191,22 @@ async function addBookmark(entry) {
   }
 }
 
-// Remove bookmark
-async function removeBookmark(entryId) {
+// Remove bookmark by ID
+async function removeBookmarkById(bookmarkId) {
   try {
-    // Find and delete the bookmark
-    const bookmark = bookmarks.value.find(b => b[0].log_entry_id === entryId)
-    if (bookmark) {
-      // Note: Need to add delete_bookmark command to backend
-      // For now, just reload bookmarks
-      await loadBookmarks()
-    }
+    await invoke('delete_bookmark', { bookmarkId })
+    await loadBookmarks()
   } catch (error) {
     console.error('Error removing bookmark:', error)
+    alert(`删除书签时出错：${error}`)
+  }
+}
+
+// Remove bookmark
+async function removeBookmark(entryId) {
+  const bookmark = bookmarks.value.find(b => b[0].log_entry_id === entryId)
+  if (bookmark && bookmark[0].id) {
+    await removeBookmarkById(bookmark[0].id)
   }
 }
 
@@ -211,6 +246,12 @@ async function addBookmarksForSelected() {
 // Clear selection
 function clearSelection() {
   selectedEntryIds.value = []
+}
+
+// Format stack trace for display (convert newlines to spaces)
+function formatStack(stack) {
+  if (!stack) return '-'
+  return stack.replace(/\n/g, ' ').trim()
 }
 
 // Toggle select all
@@ -405,6 +446,17 @@ onMounted(() => {
                         <v-list-item-subtitle class="text-caption">
                           {{ bookmark[1]?.timestamp }}
                         </v-list-item-subtitle>
+                        <template v-slot:append>
+                          <v-btn
+                            icon
+                            variant="text"
+                            size="small"
+                            color="grey"
+                            @click.stop="removeBookmarkById(bookmark[0]?.id)"
+                            title="删除书签">
+                            <v-icon size="small">mdi-close</v-icon>
+                          </v-btn>
+                        </template>
                       </v-list-item>
                     </v-list>
                     <div v-else class="pa-6 text-center text-grey">
@@ -450,12 +502,12 @@ onMounted(() => {
                         class="session-item px-3"
                         rounded="sm">
                         <template v-slot:prepend>
-                          <v-avatar 
-                            :color="currentSession === session.id ? 'primary' : 'grey-lighten-2'" 
-                            size="32" 
+                          <v-avatar
+                            :color="currentSession === session.id ? 'primary' : 'grey-lighten-2'"
+                            size="32"
                             class="mr-3">
-                            <v-icon 
-                              :color="currentSession === session.id ? 'white' : 'grey'" 
+                            <v-icon
+                              :color="currentSession === session.id ? 'white' : 'grey'"
                               size="small">
                               mdi-folder
                             </v-icon>
@@ -467,6 +519,17 @@ onMounted(() => {
                         <v-list-item-subtitle class="text-caption">
                           {{ session.total_entries }} 条记录
                         </v-list-item-subtitle>
+                        <template v-slot:append>
+                          <v-btn
+                            icon
+                            variant="text"
+                            size="small"
+                            color="grey"
+                            @click.stop="deleteSession(session.id)"
+                            title="删除会话">
+                            <v-icon size="small">mdi-delete</v-icon>
+                          </v-btn>
+                        </template>
                       </v-list-item>
                     </v-list>
                     <div v-else class="pa-6 text-center text-grey">
@@ -487,7 +550,19 @@ onMounted(() => {
             <v-card class="mb-3" elevation="2">
               <v-card-text class="pa-4">
                 <v-row align="center">
-                  <v-col cols="12" md="3">
+                  <v-col cols="12" md="2">
+                    <v-select
+                      v-model="options.itemsPerPage"
+                      :items="itemsPerPageOptions"
+                      label="每页显示"
+                      variant="outlined"
+                      density="comfortable"
+                      prepend-inner-icon="mdi-format-list-numbered"
+                      bg-color="white"
+                      @update:model-value="options.page = 1; refreshLogs()">
+                    </v-select>
+                  </v-col>
+                  <v-col cols="12" md="2">
                     <v-select
                       v-model="levelFilter"
                       :items="logLevels"
@@ -500,7 +575,7 @@ onMounted(() => {
                       @update:model-value="refreshLogs">
                     </v-select>
                   </v-col>
-                  <v-col cols="12" md="5">
+                  <v-col cols="12" md="4">
                     <v-text-field
                       v-model="searchTerm"
                       label="搜索日志内容..."
@@ -646,11 +721,13 @@ onMounted(() => {
                             <span 
                               v-bind="props" 
                               class="text-truncate d-block font-mono text-caption"
-                              style="max-width: 240px; color: #666;">
-                              {{ item.stack || '-' }}
+                              style="max-width: 240px; color: #666; white-space: pre-wrap; max-height: 40px; overflow: hidden;">
+                              {{ formatStack(item.stack) }}
                             </span>
                           </template>
-                          <span class="font-mono">{{ item.stack }}</span>
+                          <div class="font-mono text-caption" style="white-space: pre-wrap; max-width: 500px; max-height: 300px; overflow-y: auto;">
+                            {{ item.stack }}
+                          </div>
                         </v-tooltip>
                       </td>
                       <!-- Message -->

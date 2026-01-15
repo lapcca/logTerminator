@@ -261,4 +261,9 @@ impl DatabaseManager {
         self.conn.execute("DELETE FROM test_sessions WHERE id = ?", [session_id])?;
         Ok(())
     }
+
+    pub fn delete_bookmark(&self, bookmark_id: i64) -> SqlResult<()> {
+        self.conn.execute("DELETE FROM bookmarks WHERE id = ?", [bookmark_id])?;
+        Ok(())
+    }
 }
