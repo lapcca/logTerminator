@@ -13,8 +13,19 @@ const levelFilter = ref(null)
 const totalEntries = ref(0)
 const sessions = ref([])
 const showSidebar = ref(true) // 控制左侧面板显示/隐藏
+const showBookmarksPanel = ref(true) // 控制书签面板展开/折叠
+const showSessionsPanel = ref(true) // 控制测试会话面板展开/折叠
 const selectedEntryIds = ref([]) // 选中的日志条目ID
 const highlightedEntryId = ref(null) // 当前高亮的条目ID
+
+// Toggle functions
+function toggleBookmarksPanel() {
+  showBookmarksPanel.value = !showBookmarksPanel.value
+}
+
+function toggleSessionsPanel() {
+  showSessionsPanel.value = !showSessionsPanel.value
+}
 
 // Data table options
 const options = reactive({
@@ -351,88 +362,118 @@ onMounted(() => {
           <v-col v-show="showSidebar" cols="3" class="pr-4">
             <!-- Bookmarks Panel -->
             <v-card class="mb-3" elevation="2">
-              <v-card-title class="d-flex align-center py-3 px-4 bg-amber-lighten-5">
+              <v-card-title class="d-flex align-center py-2 px-4 bg-amber-lighten-5">
+                <v-btn
+                  icon
+                  variant="text"
+                  size="small"
+                  @click="showBookmarksPanel = !showBookmarksPanel"
+                  :title="showBookmarksPanel ? '收起书签面板' : '展开书签面板'"
+                  class="mr-1">
+                  <v-icon :class="{ 'rotate-180': !showBookmarksPanel }" size="20">
+                    mdi-chevron-down
+                  </v-icon>
+                </v-btn>
                 <v-icon color="amber-darken-2" class="mr-2">mdi-bookmark-multiple</v-icon>
                 <span class="font-weight-medium">书签</span>
-                <v-chip size="small" color="amber" variant="flat" class="ml-auto">
+                <v-chip size="small" color="amber" variant="flat" class="ml-2">
                   {{ bookmarks.length }}
                 </v-chip>
               </v-card-title>
-              <v-divider></v-divider>
-              <v-card-text class="pa-0" style="max-height: 300px; overflow-y: auto;">
-                <v-list v-if="bookmarks.length > 0" density="comfortable">
-                  <v-list-item
-                    v-for="bookmark in bookmarks"
-                    :key="bookmark[0]?.id"
-                    @click="jumpToBookmark(bookmark)"
-                    class="bookmark-item px-3"
-                    rounded="sm">
-                    <template v-slot:prepend>
-                      <v-avatar color="amber-lighten-3" size="32" class="mr-3">
-                        <v-icon color="amber-darken-2" size="small">mdi-bookmark</v-icon>
-                      </v-avatar>
-                    </template>
-                    <v-list-item-title class="text-body-2 font-weight-medium">
-                      {{ bookmark[0]?.title || '书签' }}
-                    </v-list-item-title>
-                    <v-list-item-subtitle class="text-caption">
-                      {{ bookmark[1]?.timestamp }}
-                    </v-list-item-subtitle>
-                  </v-list-item>
-                </v-list>
-                <div v-else class="pa-6 text-center text-grey">
-                  <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-bookmark-outline</v-icon>
-                  <div class="text-body-2">暂无书签</div>
-                  <div class="text-caption">点击日志条目旁的星号添加书签</div>
+              <v-expand-transition>
+                <div v-show="showBookmarksPanel">
+                  <v-divider></v-divider>
+                  <v-card-text class="pa-0" style="max-height: 300px; overflow-y: auto;">
+                    <v-list v-if="bookmarks.length > 0" density="comfortable">
+                      <v-list-item
+                        v-for="bookmark in bookmarks"
+                        :key="bookmark[0]?.id"
+                        @click="jumpToBookmark(bookmark)"
+                        class="bookmark-item px-3"
+                        rounded="sm">
+                        <template v-slot:prepend>
+                          <v-avatar color="amber-lighten-3" size="32" class="mr-3">
+                            <v-icon color="amber-darken-2" size="small">mdi-bookmark</v-icon>
+                          </v-avatar>
+                        </template>
+                        <v-list-item-title class="text-body-2 font-weight-medium">
+                          {{ bookmark[0]?.title || '书签' }}
+                        </v-list-item-title>
+                        <v-list-item-subtitle class="text-caption">
+                          {{ bookmark[1]?.timestamp }}
+                        </v-list-item-subtitle>
+                      </v-list-item>
+                    </v-list>
+                    <div v-else class="pa-6 text-center text-grey">
+                      <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-bookmark-outline</v-icon>
+                      <div class="text-body-2">暂无书签</div>
+                      <div class="text-caption">点击日志条目旁的星号添加书签</div>
+                    </div>
+                  </v-card-text>
                 </div>
-              </v-card-text>
+              </v-expand-transition>
             </v-card>
 
             <!-- Sessions Panel -->
             <v-card elevation="2">
-              <v-card-title class="d-flex align-center py-3 px-4 bg-blue-grey-lighten-5">
+              <v-card-title class="d-flex align-center py-2 px-4 bg-blue-grey-lighten-5">
+                <v-btn
+                  icon
+                  variant="text"
+                  size="small"
+                  @click="showSessionsPanel = !showSessionsPanel"
+                  :title="showSessionsPanel ? '收起测试会话面板' : '展开测试会话面板'"
+                  class="mr-1">
+                  <v-icon :class="{ 'rotate-180': !showSessionsPanel }" size="20">
+                    mdi-chevron-down
+                  </v-icon>
+                </v-btn>
                 <v-icon color="blue-grey" class="mr-2">mdi-folder-multiple</v-icon>
                 <span class="font-weight-medium">测试会话</span>
-                <v-chip size="small" color="blue-grey" variant="flat" class="ml-auto">
+                <v-chip size="small" color="blue-grey" variant="flat" class="ml-2">
                   {{ sessions.length }}
                 </v-chip>
               </v-card-title>
-              <v-divider></v-divider>
-              <v-card-text class="pa-0" style="max-height: calc(100vh - 500px); overflow-y: auto;">
-                <v-list v-if="sessions.length > 0" density="comfortable">
-                  <v-list-item
-                    v-for="session in sessions"
-                    :key="session.id"
-                    :class="{ 'bg-primary-lighten-5': currentSession === session.id }"
-                    @click="currentSession = session.id; refreshLogs()"
-                    class="session-item px-3"
-                    rounded="sm">
-                    <template v-slot:prepend>
-                      <v-avatar 
-                        :color="currentSession === session.id ? 'primary' : 'grey-lighten-2'" 
-                        size="32" 
-                        class="mr-3">
-                        <v-icon 
-                          :color="currentSession === session.id ? 'white' : 'grey'" 
-                          size="small">
-                          mdi-folder
-                        </v-icon>
-                      </v-avatar>
-                    </template>
-                    <v-list-item-title class="text-body-2 font-weight-medium">
-                      {{ session.name }}
-                    </v-list-item-title>
-                    <v-list-item-subtitle class="text-caption">
-                      {{ session.total_entries }} 条记录
-                    </v-list-item-subtitle>
-                  </v-list-item>
-                </v-list>
-                <div v-else class="pa-6 text-center text-grey">
-                  <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-folder-outline</v-icon>
-                  <div class="text-body-2">暂无会话</div>
-                  <div class="text-caption">打开目录加载日志</div>
+              <v-expand-transition>
+                <div v-show="showSessionsPanel">
+                  <v-divider></v-divider>
+                  <v-card-text class="pa-0" style="max-height: calc(100vh - 500px); overflow-y: auto;">
+                    <v-list v-if="sessions.length > 0" density="comfortable">
+                      <v-list-item
+                        v-for="session in sessions"
+                        :key="session.id"
+                        :class="{ 'bg-primary-lighten-5': currentSession === session.id }"
+                        @click="currentSession = session.id; refreshLogs()"
+                        class="session-item px-3"
+                        rounded="sm">
+                        <template v-slot:prepend>
+                          <v-avatar 
+                            :color="currentSession === session.id ? 'primary' : 'grey-lighten-2'" 
+                            size="32" 
+                            class="mr-3">
+                            <v-icon 
+                              :color="currentSession === session.id ? 'white' : 'grey'" 
+                              size="small">
+                              mdi-folder
+                            </v-icon>
+                          </v-avatar>
+                        </template>
+                        <v-list-item-title class="text-body-2 font-weight-medium">
+                          {{ session.name }}
+                        </v-list-item-title>
+                        <v-list-item-subtitle class="text-caption">
+                          {{ session.total_entries }} 条记录
+                        </v-list-item-subtitle>
+                      </v-list-item>
+                    </v-list>
+                    <div v-else class="pa-6 text-center text-grey">
+                      <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-folder-outline</v-icon>
+                      <div class="text-body-2">暂无会话</div>
+                      <div class="text-caption">打开目录加载日志</div>
+                    </div>
+                  </v-card-text>
                 </div>
-              </v-card-text>
+              </v-expand-transition>
             </v-card>
           </v-col>
 
@@ -713,6 +754,12 @@ onMounted(() => {
 /* Card title adjustments */
 :deep(.v-card-title) {
   font-size: 0.95rem;
+}
+
+/* Panel toggle button rotation animation */
+.rotate-180 {
+  transform: rotate(180deg);
+  transition: transform 0.3s ease;
 }
 
 /* Responsive adjustments */
