@@ -92,9 +92,11 @@ async function refreshLogs() {
       searchTerm: searchTerm.value
     })
 
-    console.log('Received entries:', result.length)
-    logEntries.value = result || []
-    totalEntries.value = result.length // Simplified for now
+    console.log('Received result:', result)
+    // Rust returns (Vec<LogEntry>, total_count)
+    const [entries, total] = result
+    logEntries.value = entries || []
+    totalEntries.value = total || 0
 
     await loadBookmarks()
   } catch (error) {
