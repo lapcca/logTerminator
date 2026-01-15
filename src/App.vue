@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
@@ -12,6 +12,8 @@ const searchTerm = ref('')
 const levelFilter = ref(null)
 const totalEntries = ref(0)
 const sessions = ref([])
+const showSidebar = ref(true) // 控制左侧面板显示/隐藏
+const selectedEntries = ref([]) // 选中的日志条目
 
 // Data table options
 const options = reactive({
@@ -24,13 +26,14 @@ const options = reactive({
 // Log levels for filtering
 const logLevels = ['ERROR', 'WARNING', 'INFO', 'DEBUG', 'TRACE']
 
-// Table headers
+// Table headers - 添加选择列
 const headers = [
-  { text: '时间戳', value: 'timestamp', width: '180px' },
-  { text: '级别', value: 'level', width: '80px' },
-  { text: '调用栈', value: 'stack', width: '250px' },
-  { text: '消息', value: 'message' },
-  { text: '操作', value: 'actions', width: '80px', sortable: false }
+  { title: '', key: 'data-table-select', width: '48px', sortable: false },
+  { title: '时间戳', key: 'timestamp', width: '180px' },
+  { title: '级别', key: 'level', width: '80px' },
+  { title: '调用栈', key: 'stack', width: '250px' },
+  { title: '消息', key: 'message' },
+  { title: '操作', key: 'actions', width: '80px', sortable: false }
 ]
 
 // Open log directory
@@ -133,10 +136,68 @@ async function addBookmark(entry) {
   }
 }
 
+// Add bookmarks for selected entries
+async function addBookmarksForSelected() {
+  if (selectedEntries.value.length === 0) {
+    alert('请先选择日志条目')
+    return
+  }
+
+  try {
+    for (const entry of selectedEntries.value) {
+      await invoke('add_bookmark', {
+        logEntryId: entry.id,
+        title: `标记 ${entry.timestamp}`,
+        color: 'yellow'
+      })
+    }
+    await loadBookmarks()
+    selectedEntries.value = [] // 清空选择
+  } catch (error) {
+    console.error('Error adding bookmarks:', error)
+    alert(`批量添加书签时出错：${error}`)
+  }
+}
+
 // Jump to bookmark
 function jumpToBookmark(bookmark) {
   console.log('Jump to bookmark:', bookmark)
-  // TODO: Implement jump functionality
+  // TODO: Implement jump functionality - 滚动到指定日志条目
+  if (bookmark[1] && bookmark[1].timestamp) {
+    // 找到对应的日志条目并滚动到可见区域
+    const targetEntry = logEntries.value.find(e => e.timestamp === bookmark[1].timestamp)
+    if (targetEntry) {
+      // 高亮显示并滚动到该条目
+      const index = logEntries.value.indexOf(targetEntry)
+      const pageStart = (options.page - 1) * options.itemsPerPage
+      const targetPage = Math.floor((pageStart + index) / options.itemsPerPage) + 1
+      if (targetPage !== options.page) {
+        options.page = targetPage
+        setTimeout(() => {
+          // 滚动后高亮
+          highlightEntry(targetEntry.id)
+        }, 100)
+      } else {
+        highlightEntry(targetEntry.id)
+      }
+    }
+  }
+}
+
+// 高亮指定条目
+function highlightEntry(entryId) {
+  // 使用DOM操作高亮显示
+  const rows = document.querySelectorAll('.v-data-table__tr')
+  rows.forEach(row => {
+    const dataId = row.getAttribute('data-entry-id')
+    if (dataId === String(entryId)) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      row.style.backgroundColor = 'rgba(255, 193, 7, 0.3)'
+      setTimeout(() => {
+        row.style.backgroundColor = ''
+      }, 2000)
+    }
+  })
 }
 
 // Get level color for chips
@@ -175,6 +236,12 @@ onMounted(() => {
 <template>
   <v-app>
     <v-app-bar app color="primary" dark>
+      <v-btn
+        icon
+        @click="showSidebar = !showSidebar"
+        class="mr-2">
+        <v-icon>{{ showSidebar ? 'mdi-panel-close' : 'mdi-panel-open' }}</v-icon>
+      </v-btn>
       <v-toolbar-title>
         <v-icon class="mr-2">mdi-file-document-outline</v-icon>
         LogTerminator - 日志查看器
@@ -188,8 +255,8 @@ onMounted(() => {
     <v-main>
       <v-container fluid>
         <v-row>
-          <!-- Bookmarks panel -->
-          <v-col cols="3">
+          <!-- Bookmarks panel - 可隐藏 -->
+          <v-col v-show="showSidebar" cols="3">
             <v-card class="mb-4" elevation="2">
               <v-card-title class="bg-blue-grey-lighten-5">
                 <v-icon class="mr-2">mdi-bookmark-multiple</v-icon>
@@ -254,7 +321,7 @@ onMounted(() => {
           </v-col>
 
           <!-- Main content -->
-          <v-col cols="9">
+          <v-col :cols="showSidebar ? 9 : 12">
             <!-- Filters -->
             <v-card class="mb-4" elevation="2">
               <v-card-title class="bg-grey-lighten-4">
@@ -263,7 +330,7 @@ onMounted(() => {
               </v-card-title>
               <v-card-text>
                 <v-row>
-                  <v-col cols="3">
+                  <v-col cols="2">
                     <v-select
                       v-model="levelFilter"
                       :items="logLevels"
@@ -275,7 +342,7 @@ onMounted(() => {
                       @change="refreshLogs">
                     </v-select>
                   </v-col>
-                  <v-col cols="6">
+                  <v-col cols="5">
                     <v-text-field
                       v-model="searchTerm"
                       label="搜索内容"
@@ -287,7 +354,17 @@ onMounted(() => {
                     </v-text-field>
                   </v-col>
                   <v-col cols="3">
-                    <v-btn @click="refreshLogs" color="primary" :loading="loading" prepend-icon="mdi-refresh" size="large">
+                    <v-btn
+                      @click="addBookmarksForSelected"
+                      :disabled="selectedEntries.length === 0"
+                      color="warning"
+                      prepend-icon="mdi-bookmark-plus"
+                      size="large">
+                      批量添加书签 ({{ selectedEntries.length }})
+                    </v-btn>
+                  </v-col>
+                  <v-col cols="2">
+                    <v-btn @click="refreshLogs" color="primary" :loading="loading" prepend-icon="mdi-refresh" size="large" block>
                       刷新
                     </v-btn>
                   </v-col>
@@ -305,17 +382,20 @@ onMounted(() => {
                 </v-chip>
               </v-card-title>
               <v-card-text class="pa-0">
-                <v-data-table
+                <v-data-table-server
+                  v-model="selectedEntries"
                   :headers="headers"
                   :items="logEntries"
                   :loading="loading"
                   :server-items-length="totalEntries"
                   :options.sync="options"
                   @update:options="handlePagination"
+                  show-select
                   class="elevation-0"
                   density="compact"
                   fixed-header
-                  height="calc(100vh - 280px)">
+                  height="calc(100vh - 280px)"
+                  item-value="id">
 
                   <template v-slot:item.level="{ item }">
                     <v-chip
@@ -329,7 +409,7 @@ onMounted(() => {
                   <template v-slot:item.stack="{ item }">
                     <v-tooltip bottom>
                       <template v-slot:activator="{ on }">
-                        <span v-on="on" class="text-truncate" style="max-width: 200px;">
+                        <span v-on="on" class="text-truncate d-block" style="max-width: 200px;">
                           {{ item.stack }}
                         </span>
                       </template>
@@ -353,7 +433,7 @@ onMounted(() => {
                     </v-tooltip>
                   </template>
 
-                </v-data-table>
+                </v-data-table-server>
               </v-card-text>
             </v-card>
           </v-col>
@@ -386,6 +466,11 @@ onMounted(() => {
 :deep(.v-data-table-header th) {
   background-color: #f5f5f5;
   font-weight: 600;
+}
+
+/* 选中行高亮样式 */
+:deep(.v-data-table__tr--selected) {
+  background-color: rgba(255, 193, 7, 0.15) !important;
 }
 
 /* 卡片标题样式 */
