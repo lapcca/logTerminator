@@ -51,45 +51,50 @@ impl HtmlLogParser {
         let content = std::fs::read_to_string(file_path)?;
         let document = Html::parse_document(&content);
 
-        // Select table rows
-        let row_selector = Selector::parse("table tr").unwrap();
-        
-        // Selectors for the log entry structure
-        let stack_selector = Selector::parse("td.stack[hidden]").unwrap();
-        let hierarchy_selector = Selector::parse("td.hierarchy button").unwrap();
+        // Safe selector parsing - handle invalid selectors gracefully
+        let row_selector = Selector::parse("table tr").ok();
+        let cell_selector = Selector::parse("td").ok();
+
+        let row_selector = match row_selector {
+            Some(s) => s,
+            None => {
+                println!("Warning: Could not parse row selector");
+                return Ok(Vec::new());
+            }
+        };
 
         let mut entries = Vec::new();
         let mut line_number = 0;
 
         for row in document.select(&row_selector) {
-            // Try to find the stack trace in a hidden td with class="stack"
-            let stack_text = row.select(&stack_selector)
-                .next()
-                .map(|el| el.text().collect::<String>().trim().to_string())
-                .unwrap_or_default();
-
-            // Get the hierarchy button text (file path)
-            let hierarchy_text = row.select(&hierarchy_selector)
-                .next()
-                .map(|el| el.text().collect::<String>().trim().to_string())
-                .unwrap_or_default();
-
-            // Try to get all text content from the row (fallback)
-            let _all_text: Vec<String> = row.text().map(|s| s.trim().to_string()).collect();
-
-            // Extract cells using direct children tds
-            let cell_selector = Selector::parse("> td").unwrap();
-            let cells: Vec<_> = row.select(&cell_selector).collect();
+            // Extract cells using available selector
+            let cells: Vec<_> = if let Some(cell_sel) = &cell_selector {
+                row.select(cell_sel).collect()
+            } else {
+                Vec::new()
+            };
 
             // Skip header row and ensure we have enough cells
-            // Structure: timestamp, level, (stack/hierarchy), message
             if cells.len() >= 4 {
                 let timestamp_text = cells[0].text().collect::<String>().trim().to_string();
                 let level_text = cells[1].text().collect::<String>().trim().to_string();
                 let message_text = cells[cells.len() - 1].text().collect::<String>().trim().to_string();
 
+                // Try to get stack from third cell if it looks like a stack trace
+                let stack_text = if cells.len() > 2 {
+                    let potential_stack = cells[2].text().collect::<String>().trim().to_string();
+                    if potential_stack.contains("File ") || potential_stack.contains(".py:") {
+                        potential_stack
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+
                 // Skip empty rows or header rows
-                if !timestamp_text.is_empty() && !level_text.is_empty() {
+                if !timestamp_text.is_empty() && !level_text.is_empty() 
+                    && timestamp_text != "Timestamp" && level_text != "Level" {
                     let entry = LogEntry {
                         id: None,
                         test_session_id: test_session_id.to_string(),
@@ -97,7 +102,7 @@ impl HtmlLogParser {
                         file_index,
                         timestamp: timestamp_text,
                         level: level_text,
-                        stack: if !stack_text.is_empty() { stack_text } else { hierarchy_text },
+                        stack: stack_text,
                         message: message_text,
                         line_number,
                         created_at: Some(Utc::now()),
