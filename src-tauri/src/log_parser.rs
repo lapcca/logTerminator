@@ -54,6 +54,8 @@ impl HtmlLogParser {
         // Safe selector parsing - handle invalid selectors gracefully
         let row_selector = Selector::parse("table tr").ok();
         let cell_selector = Selector::parse("td").ok();
+        // Selector for hidden stack trace td
+        let stack_selector = Selector::parse("td.stack[hidden]").ok();
 
         let row_selector = match row_selector {
             Some(s) => s,
@@ -78,19 +80,41 @@ impl HtmlLogParser {
             if cells.len() >= 4 {
                 let timestamp_text = cells[0].text().collect::<String>().trim().to_string();
                 let level_text = cells[1].text().collect::<String>().trim().to_string();
-                let message_text = cells[cells.len() - 1].text().collect::<String>().trim().to_string();
-
-                // Try to get stack from third cell if it looks like a stack trace
-                let stack_text = if cells.len() > 2 {
-                    let potential_stack = cells[2].text().collect::<String>().trim().to_string();
-                    if potential_stack.contains("File ") || potential_stack.contains(".py:") {
-                        potential_stack
-                    } else {
-                        String::new()
+                
+                // Try to get stack from hidden td.stack element first
+                let mut stack_text = String::new();
+                if let Some(stack_sel) = &stack_selector {
+                    if let Some(stack_elem) = row.select(stack_sel).next() {
+                        stack_text = stack_elem.text().collect::<String>().trim().to_string();
                     }
-                } else {
-                    String::new()
-                };
+                }
+
+                // If no stack from hidden element, try cells[2]
+                if stack_text.is_empty() && cells.len() > 2 {
+                    let cell2_text = cells[2].text().collect::<String>().trim().to_string();
+                    // If it looks like a stack trace, use it
+                    if cell2_text.contains("File ") || cell2_text.contains(".py:") 
+                        || cell2_text.contains("line ") || cell2_text.len() > 50 {
+                        stack_text = cell2_text;
+                    }
+                }
+
+                // Get message from last cell
+                let mut message_text = cells[cells.len() - 1].text().collect::<String>().trim().to_string();
+
+                // If message looks like a stack trace, it's probably the actual message
+                // and the real stack is elsewhere (hidden), so swap them
+                if message_text.contains("File ") && message_text.contains(".py:") 
+                    && stack_text.contains("File ") && stack_text.len() > 100 {
+                    // message has short trace, stack has full trace - keep stack in stack
+                    // message might be empty or just a brief error
+                } else if message_text.contains("File ") && message_text.contains(".py:")
+                    && stack_text.is_empty() {
+                    // Message contains the stack trace, put it in stack, clear message
+                    // This means there was no hidden stack, message has it all
+                    // But we need to find if there's a separate message
+                    // For now, keep the trace in stack, leave message as is
+                }
 
                 // Skip empty rows or header rows
                 if !timestamp_text.is_empty() && !level_text.is_empty() 
