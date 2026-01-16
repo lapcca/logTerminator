@@ -51,12 +51,8 @@ impl HtmlLogParser {
         let content = std::fs::read_to_string(file_path)?;
         let document = Html::parse_document(&content);
 
-        // Safe selector parsing - handle invalid selectors gracefully
+        // Select table rows
         let row_selector = Selector::parse("table tr").ok();
-        let cell_selector = Selector::parse("td").ok();
-        // Selector for hidden stack trace td
-        let stack_selector = Selector::parse("td.stack[hidden]").ok();
-
         let row_selector = match row_selector {
             Some(s) => s,
             None => {
@@ -65,84 +61,86 @@ impl HtmlLogParser {
             }
         };
 
+        // Direct selectors for specific cell types
+        let date_selector = Selector::parse("td.date").ok();
+        let level_selector = Selector::parse("td.level").ok();
+        let message_selector = Selector::parse("td.message").ok();
+        let stack_selector = Selector::parse("td.stack[hidden]").ok();
+        let th_selector = Selector::parse("th").ok();
+        let td_any_selector = Selector::parse("td").ok();
+
+        let th_selector = match th_selector {
+            Some(s) => s,
+            None => return Ok(Vec::new()),
+        };
+
+        let td_any_selector = match td_any_selector {
+            Some(s) => s,
+            None => return Ok(Vec::new()),
+        };
+
         let mut entries = Vec::new();
         let mut line_number = 0;
 
         for row in document.select(&row_selector) {
-            // Extract all td cells
-            let cells: Vec<_> = if let Some(cell_sel) = &cell_selector {
-                row.select(cell_sel).collect()
+            // Skip header row (has th elements)
+            if row.select(&th_selector).next().is_some() {
+                line_number += 1;
+                continue;
+            }
+
+            // Extract timestamp from td.date
+            let timestamp_text = if let Some(sel) = &date_selector {
+                row.select(sel).next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .unwrap_or_default()
             } else {
-                Vec::new()
+                row.select(&td_any_selector).next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .unwrap_or_default()
             };
 
-            // Need at least: timestamp, level, hierarchy/message (3 cells minimum)
-            if cells.len() < 3 {
+            if timestamp_text.is_empty() || timestamp_text == "Timestamp" {
                 line_number += 1;
                 continue;
             }
 
-            let timestamp_text = cells[0].text().collect::<String>().trim().to_string();
-            let level_text = cells[1].text().collect::<String>().trim().to_string();
-
-            // Skip header row
-            if timestamp_text == "Timestamp" && level_text == "Level" {
-                line_number += 1;
-                continue;
-            }
-
-            // Skip empty rows
-            if timestamp_text.is_empty() || level_text.is_empty() {
-                line_number += 1;
-                continue;
-            }
-
-            // Try to get stack from hidden td.stack element first
-            let mut stack_text = String::new();
-            let message_text;
-
-            if let Some(stack_sel) = &stack_selector {
-                if let Some(stack_elem) = row.select(stack_sel).next() {
-                    stack_text = stack_elem.text().collect::<String>().trim().to_string();
-                }
-            }
-
-            // Determine message based on table structure:
-            // Structure appears to be: timestamp, level, hierarchy, [hidden stack], message
-            // Or: timestamp, level, hierarchy, message (if no hidden stack)
-            if cells.len() >= 4 {
-                // cells[2] is hierarchy button, cells[3] could be message or something else
-                let cell3_text = cells[3].text().collect::<String>().trim().to_string();
-                
-                if !stack_text.is_empty() {
-                    // We have hidden stack, cells[3] should be message (if it exists)
-                    // If cells[4] exists, use cells[4] as message
-                    if cells.len() >= 5 {
-                        message_text = cells[4].text().collect::<String>().trim().to_string();
-                    } else {
-                        message_text = cell3_text;
-                    }
-                } else {
-                    // No hidden stack found
-                    // Check if cells[3] looks like a stack trace (long with "File" and ".py:")
-                    if cell3_text.contains("File ") && (cell3_text.contains(".py:") || cell3_text.contains("line ")) {
-                        // cells[3] is actually the stack trace
-                        stack_text = cell3_text;
-                        // Message should be in cells[4] if it exists
-                        if cells.len() >= 5 {
-                            message_text = cells[4].text().collect::<String>().trim().to_string();
-                        } else {
-                            message_text = String::new();
-                        }
-                    } else {
-                        // cells[3] is the message
-                        message_text = cell3_text;
-                    }
-                }
+            // Extract level from td.level
+            let level_text = if let Some(sel) = &level_selector {
+                row.select(sel).next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .unwrap_or_default()
             } else {
-                // Only 3 cells - use cells[2] as message, no stack
-                message_text = cells[2].text().collect::<String>().trim().to_string();
-            }
+                let cells: Vec<_> = row.select(&td_any_selector).collect();
+                if cells.len() > 1 {
+                    cells[1].text().collect::<String>().trim().to_string()
+                } else {
+                    String::new()
+                }
+            };
+
+            // Extract message from td.message
+            let message_text = if let Some(sel) = &message_selector {
+                row.select(sel).next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .unwrap_or_default()
+            } else {
+                let cells: Vec<_> = row.select(&td_any_selector).collect();
+                if !cells.is_empty() {
+                    cells[cells.len() - 1].text().collect::<String>().trim().to_string()
+                } else {
+                    String::new()
+                }
+            };
+
+            // Try to find hidden stack trace
+            let stack_text = if let Some(sel) = &stack_selector {
+                row.select(sel).next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
 
             let entry = LogEntry {
                 id: None,
@@ -181,7 +179,6 @@ impl HtmlLogParser {
             }
         }
 
-        // Sort files by index in filename (e.g., ---0.html, ---1.html, etc.)
         html_files.sort_by(|a, b| {
             let a_index = Self::extract_file_index(a);
             let b_index = Self::extract_file_index(b);
