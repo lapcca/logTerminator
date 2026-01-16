@@ -765,17 +765,24 @@ onMounted(() => {
                       </td>
                       <!-- Stack -->
                       <td>
-                        <v-tooltip location="top">
+                        <v-tooltip 
+                          location="top" 
+                          open-on-hover
+                          close-on-content-click="false"
+                          :disabled="!item.stack">
                           <template v-slot:activator="{ props }">
                             <span 
                               v-bind="props" 
-                              class="text-truncate d-block font-mono text-caption"
-                              style="max-width: 240px; color: #666; white-space: pre-wrap; max-height: 40px; overflow: hidden;">
+                              class="text-truncate d-block font-mono text-caption stack-cell"
+                              :class="{ 'has-stack': item.stack }"
+                              style="max-width: 240px; color: #666; display: block; min-height: 20px;">
                               {{ formatStack(item.stack) }}
                             </span>
                           </template>
-                          <div class="font-mono text-caption" style="white-space: pre-wrap; max-width: 500px; max-height: 300px; overflow-y: auto;">
-                            {{ item.stack }}
+                          <div v-if="item.stack" class="stack-tooltip">
+                            <div class="font-mono text-caption" style="white-space: pre-wrap; max-width: 600px; max-height: 400px; overflow-y: auto; text-align: left;">
+                              {{ item.stack }}
+                            </div>
                           </div>
                         </v-tooltip>
                       </td>
@@ -890,6 +897,36 @@ onMounted(() => {
 .rotate-180 {
   transform: rotate(180deg);
   transition: transform 0.3s ease;
+}
+
+/* Stack cell styling */
+.stack-cell {
+  cursor: default;
+  line-height: 1.4;
+  padding: 2px 0;
+}
+
+.stack-cell.has-stack {
+  cursor: help;
+}
+
+.stack-cell.has-stack:hover {
+  background-color: rgba(158, 158, 158, 0.15);
+  border-radius: 4px;
+}
+
+/* Stack tooltip styling */
+.stack-tooltip {
+  padding: 8px 12px;
+  background: rgba(33, 33, 33, 0.95) !important;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+/* Ensure tooltip content is readable */
+.stack-tooltip .v-card {
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 /* Responsive adjustments */
