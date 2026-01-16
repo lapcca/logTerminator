@@ -81,10 +81,15 @@ impl HtmlLogParser {
 
         let mut entries = Vec::new();
         let mut line_number = 0;
+        let mut rows_processed = 0;
+        let mut rows_with_date = 0;
+        let mut rows_skipped_no_date = 0;
+        let mut rows_skipped_header = 0;
 
         for row in document.select(&row_selector) {
             // Skip header row (has th elements)
             if row.select(&th_selector).next().is_some() {
+                rows_skipped_header += 1;
                 line_number += 1;
                 continue;
             }
@@ -101,9 +106,12 @@ impl HtmlLogParser {
             };
 
             if timestamp_text.is_empty() || timestamp_text == "Timestamp" {
+                rows_skipped_no_date += 1;
                 line_number += 1;
                 continue;
             }
+
+            rows_with_date += 1;
 
             // Extract level from td.level
             let level_text = if let Some(sel) = &level_selector {
