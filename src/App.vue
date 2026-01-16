@@ -769,6 +769,9 @@ onMounted(() => {
                           location="top" 
                           open-on-hover
                           close-on-content-click="false"
+                          :open-delay="200"
+                          :close-delay="300"
+                          transition="fade-transition"
                           :disabled="!item.stack">
                           <template v-slot:activator="{ props }">
                             <span 
@@ -779,11 +782,11 @@ onMounted(() => {
                               {{ formatStack(item.stack) }}
                             </span>
                           </template>
-                          <div v-if="item.stack" class="stack-tooltip">
-                            <div class="font-mono text-caption" style="white-space: pre-wrap; max-width: 600px; max-height: 400px; overflow-y: auto; text-align: left;">
+                          <v-card v-if="item.stack" class="stack-tooltip-card" max-width="600" max-height="400" style="background: rgba(33,33,33,0.98);">
+                            <v-card-text class="font-mono text-caption pa-3" style="color: #e0e0e0; white-space: pre-wrap; overflow-y: auto; max-height: 380px;">
                               {{ item.stack }}
-                            </div>
-                          </div>
+                            </v-card-text>
+                          </v-card>
                         </v-tooltip>
                       </td>
                       <!-- Message -->
@@ -915,18 +918,27 @@ onMounted(() => {
   border-radius: 4px;
 }
 
-/* Stack tooltip styling */
-.stack-tooltip {
-  padding: 8px 12px;
-  background: rgba(33, 33, 33, 0.95) !important;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+/* Stack tooltip card styling */
+.stack-tooltip-card {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px !important;
 }
 
 /* Ensure tooltip content is readable */
-.stack-tooltip .v-card {
-  background: transparent !important;
-  box-shadow: none !important;
+.stack-tooltip-card .v-card-text {
+  line-height: 1.5;
+}
+
+/* Fade transition for tooltip */
+.fade-transition-enter-active,
+.fade-transition-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-transition-enter-from,
+.fade-transition-leave-to {
+  opacity: 0;
 }
 
 /* Responsive adjustments */
