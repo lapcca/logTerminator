@@ -20,6 +20,11 @@ const selectedEntryIds = ref([]) // 选中的日志条目ID
 const highlightedEntryId = ref(null) // 当前高亮的条目ID
 const jumpToPage = ref(1) // 跳转到页码输入框的值
 
+// Bookmark editing
+const showEditBookmarkDialog = ref(false) // 控制编辑书签对话框显示
+const editingBookmark = ref(null) // 当前编辑的书签
+const editingBookmarkTitle = ref('') // 编辑时的临时标题
+
 // Toggle functions
 function toggleBookmarksPanel() {
   showBookmarksPanel.value = !showBookmarksPanel.value
@@ -232,12 +237,19 @@ function isBookmarked(entryId) {
   return bookmarks.value.some(b => b[0].log_entry_id === entryId)
 }
 
+// Truncate text for display
+function truncateText(text, maxLength = 80) {
+  if (!text) return '书签'
+  if (text.length <= maxLength) return text
+  return text.substring(0, maxLength).trim() + '...'
+}
+
 // Add bookmark
 async function addBookmark(entry) {
   try {
     await invoke('add_bookmark', {
       logEntryId: entry.id,
-      title: `书签 ${entry.timestamp}`,
+      title: truncateText(entry.message),
       color: 'amber'
     })
     await loadBookmarks()
@@ -266,6 +278,37 @@ async function removeBookmark(entryId) {
   }
 }
 
+// Show edit bookmark title dialog
+function showEditBookmarkTitleDialog(bookmark) {
+  editingBookmark.value = bookmark
+  editingBookmarkTitle.value = bookmark[0]?.title || ''
+  showEditBookmarkDialog.value = true
+}
+
+// Update bookmark title
+async function updateBookmarkTitle(bookmarkId, newTitle) {
+  try {
+    await invoke('update_bookmark_title', { bookmarkId, title: newTitle })
+    await loadBookmarks()
+  } catch (error) {
+    console.error('Error updating bookmark:', error)
+    alert(`更新书签时出错：${error}`)
+  }
+}
+
+// Confirm edit bookmark
+function confirmEditBookmark() {
+  if (editingBookmark.value) {
+    const bookmarkId = editingBookmark.value[0]?.id
+    if (bookmarkId) {
+      updateBookmarkTitle(bookmarkId, editingBookmarkTitle.value)
+    }
+    showEditBookmarkDialog.value = false
+    editingBookmark.value = null
+    editingBookmarkTitle.value = ''
+  }
+}
+
 // Toggle bookmark
 async function toggleBookmark(entry) {
   if (isBookmarked(entry.id)) {
@@ -287,7 +330,7 @@ async function addBookmarksForSelected() {
       if (!isBookmarked(entry.id)) {
         await invoke('add_bookmark', {
           logEntryId: entry.id,
-          title: `书签 ${entry.timestamp}`,
+          title: truncateText(entry.message),
           color: 'amber'
         })
       }
@@ -477,6 +520,37 @@ watch(dynamicLogLevels, (newLevels) => {
 
 <template>
   <v-app>
+    <!-- Edit Bookmark Dialog -->
+    <v-dialog v-model="showEditBookmarkDialog" max-width="400">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-bookmark-edit</v-icon>
+          编辑书签名称
+        </v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="editingBookmarkTitle"
+            label="书签名称"
+            variant="outlined"
+            autofocus
+            prepend-inner-icon="mdi-form-textbox"
+            hide-details
+            class="mb-4"
+            @keyup.enter="confirmEditBookmark">
+          </v-text-field>
+          <div v-if="editingBookmark" class="text-caption text-grey">
+            <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
+            日志时间: {{ editingBookmark[1]?.timestamp }}
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn variant="text" @click="showEditBookmarkDialog = false">取消</v-btn>
+          <v-btn color="primary" variant="flat" @click="confirmEditBookmark">确定</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- App Bar -->
     <v-app-bar app color="primary" dark elevation="2">
       <v-btn
@@ -560,10 +634,16 @@ watch(dynamicLogLevels, (newLevels) => {
                         <v-list-item-title class="text-body-2 font-weight-medium">
                           {{ bookmark[0]?.title || '书签' }}
                         </v-list-item-title>
-                        <v-list-item-subtitle class="text-caption">
-                          {{ bookmark[1]?.timestamp }}
-                        </v-list-item-subtitle>
                         <template v-slot:append>
+                          <v-btn
+                            icon
+                            variant="text"
+                            size="small"
+                            color="grey"
+                            @click.stop="showEditBookmarkTitleDialog(bookmark)"
+                            title="编辑书签名称">
+                            <v-icon size="small">mdi-pencil</v-icon>
+                          </v-btn>
                           <v-btn
                             icon
                             variant="text"

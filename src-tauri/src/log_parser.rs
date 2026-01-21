@@ -115,7 +115,11 @@ impl HtmlLogParser {
             } else {
                 let cells: Vec<_> = row.select(&td_any_selector).collect();
                 if cells.len() > 1 {
-                    cells[1].text().collect::<String>().trim().to_string()
+                    cells[1]
+                        .text()
+                        .collect::<String>()
+                        .trim()
+                        .to_string()
                         .trim_matches(&['[', ']'] as &[char])
                         .to_string()
                 } else {
