@@ -214,6 +214,19 @@ fn delete_bookmark(state: State<'_, AppState>, bookmark_id: i64) -> Result<(), S
         .map_err(|e| format!("Failed to delete bookmark: {}", e))
 }
 
+// Update bookmark title
+#[tauri::command]
+async fn update_bookmark_title(
+    state: State<'_, AppState>,
+    bookmark_id: i64,
+    title: &str,
+) -> Result<(), String> {
+    let db_manager = state.db_manager.lock().unwrap();
+    db_manager
+        .update_bookmark_title(bookmark_id, title)
+        .map_err(|e| format!("Failed to update bookmark title: {}", e))
+}
+
 // Get the page number for a specific log entry (for bookmark jumping)
 #[tauri::command]
 fn get_entry_page(
@@ -225,7 +238,12 @@ fn get_entry_page(
 ) -> Result<Option<usize>, String> {
     let db_manager = state.db_manager.lock().unwrap();
     db_manager
-        .get_entry_page(entry_id, items_per_page, level_filter.as_deref(), search_term.as_deref())
+        .get_entry_page(
+            entry_id,
+            items_per_page,
+            level_filter.as_deref(),
+            search_term.as_deref(),
+        )
         .map_err(|e| format!("Failed to get entry page: {}", e))
 }
 
@@ -250,6 +268,7 @@ pub fn run() {
             add_bookmark,
             get_bookmarks,
             delete_bookmark,
+            update_bookmark_title,
             get_entry_page,
             get_sessions,
             delete_session

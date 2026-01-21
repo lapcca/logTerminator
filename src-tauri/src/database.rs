@@ -221,7 +221,7 @@ impl DatabaseManager {
             FROM bookmarks b
             JOIN log_entries e ON b.log_entry_id = e.id
             WHERE e.test_session_id = ?
-            ORDER BY b.created_at DESC
+            ORDER BY e.timestamp ASC
         ";
 
         let mut stmt = self.conn.prepare(query)?;
@@ -293,6 +293,14 @@ impl DatabaseManager {
         Ok(())
     }
 
+    pub fn update_bookmark_title(&self, bookmark_id: i64, title: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "UPDATE bookmarks SET title = ? WHERE id = ?",
+            params![title, bookmark_id],
+        )?;
+        Ok(())
+    }
+
     pub fn get_entry_page(
         &self,
         entry_id: i64,
@@ -301,11 +309,14 @@ impl DatabaseManager {
         search_term: Option<&str>,
     ) -> SqlResult<Option<usize>> {
         // First get the session_id and timestamp for this entry
-        let entry_info: Option<(String, String)> = self.conn.query_row(
-            "SELECT test_session_id, timestamp FROM log_entries WHERE id = ?",
-            [entry_id],
-            |row| Ok((row.get(0)?, row.get(1)?))
-        ).optional()?;
+        let entry_info: Option<(String, String)> = self
+            .conn
+            .query_row(
+                "SELECT test_session_id, timestamp FROM log_entries WHERE id = ?",
+                [entry_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
 
         let (session_id, entry_timestamp) = match entry_info {
             Some(info) => info,
@@ -343,7 +354,9 @@ impl DatabaseManager {
         );
 
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let count_before: usize = self.conn.query_row(&count_query, &param_refs[..], |row| row.get(0))?;
+        let count_before: usize = self
+            .conn
+            .query_row(&count_query, &param_refs[..], |row| row.get(0))?;
 
         // Calculate page number (1-indexed)
         let page = (count_before / items_per_page) + 1;
