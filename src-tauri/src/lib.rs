@@ -1,10 +1,10 @@
-pub mod log_parser;
 mod database;
+pub mod log_parser;
 
+use crate::database::DatabaseManager;
+use crate::log_parser::{Bookmark, HtmlLogParser, LogEntry, TestSession};
 use std::sync::Mutex;
 use tauri::State;
-use crate::database::DatabaseManager;
-use crate::log_parser::{HtmlLogParser, LogEntry, Bookmark, TestSession};
 
 // App state
 struct AppState {
@@ -21,97 +21,112 @@ fn greet(name: &str) -> String {
 fn parse_directory_blocking(
     db_path: String,
     directory_path: String,
-) -> Result<(String, usize, usize), String> {
+) -> Result<Vec<(String, String, usize, usize)>, String> {
     println!("[BLOCKING] Starting to parse: {}", directory_path);
 
-    // Generate session ID
-    let session_id = format!("session_{}", chrono::Utc::now().timestamp());
-
-    // Scan HTML files
-    let html_files = HtmlLogParser::scan_html_files(&directory_path)
-        .map_err(|e| format!("Failed to scan directory: {}", e))?;
-
-    if html_files.is_empty() {
-        return Err("No HTML log files found in the directory".to_string());
-    }
-
-    println!("[BLOCKING] Found {} HTML files", html_files.len());
-
-    // Parse all files
-    let mut all_entries = Vec::new();
-    let mut total_entries = 0;
-
-    for (index, file_path) in html_files.iter().enumerate() {
-        println!("[BLOCKING] Processing file {} of {}: {}", index + 1, html_files.len(), file_path);
-        
-        match HtmlLogParser::parse_file(file_path, &session_id, index) {
-            Ok(entries) => {
-                total_entries += entries.len();
-                all_entries.extend(entries);
-            }
-            Err(e) => {
-                println!("Warning: Failed to parse {}: {}", file_path, e);
-            }
-        }
-    }
-
-    if all_entries.is_empty() {
-        return Err("No valid log entries found in the HTML files".to_string());
-    }
-
-    println!("[BLOCKING] Parsed {} entries, saving to database...", total_entries);
-
-    // Create test session
-    let session = TestSession {
-        id: session_id.clone(),
-        name: std::path::Path::new(&directory_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("Unknown Session")
-            .to_string(),
-        directory_path: directory_path.clone(),
-        file_count: html_files.len(),
-        total_entries,
-        created_at: Some(chrono::Utc::now()),
-        last_parsed_at: Some(chrono::Utc::now()),
-    };
-
-    // Initialize database and save
     let mut db_manager = DatabaseManager::new(&db_path)
         .map_err(|e| format!("Failed to initialize database: {}", e))?;
-    
-    db_manager.create_test_session(&session)
-        .map_err(|e| format!("Failed to create session: {}", e))?;
 
-    db_manager.insert_entries(&all_entries)
-        .map_err(|e| format!("Failed to insert entries: {}", e))?;
+    let test_groups = HtmlLogParser::scan_html_files(&directory_path)
+        .map_err(|e| format!("Failed to scan directory: {}", e))?;
 
-    println!("[BLOCKING] Successfully completed: {} files, {} entries", html_files.len(), total_entries);
+    if test_groups.is_empty() {
+        return Err("No test log files found in the directory".to_string());
+    }
 
-    Ok((session_id, html_files.len(), total_entries))
+    println!("[BLOCKING] Found {} test groups", test_groups.len());
+
+    let mut session_results = Vec::new();
+
+    for (test_name, html_files) in test_groups {
+        println!(
+            "[BLOCKING] Processing test group: {} ({} files)",
+            test_name,
+            html_files.len()
+        );
+
+        let session_id = format!(
+            "session_{}_{}",
+            test_name.replace(|c: char| !c.is_alphanumeric() && c != '_', "_"),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        );
+
+        let mut all_entries = Vec::new();
+        let mut total_entries = 0;
+
+        for (index, file_path) in html_files.iter().enumerate() {
+            match HtmlLogParser::parse_file(file_path, &session_id, index) {
+                Ok(entries) => {
+                    total_entries += entries.len();
+                    all_entries.extend(entries);
+                }
+                Err(e) => {
+                    println!("Warning: Failed to parse {}: {}", file_path, e);
+                }
+            }
+        }
+
+        if all_entries.is_empty() {
+            println!("Warning: No valid log entries found for test {}", test_name);
+            continue;
+        }
+
+        let session = TestSession {
+            id: session_id.clone(),
+            name: test_name.clone(),
+            directory_path: directory_path.clone(),
+            file_count: html_files.len(),
+            total_entries,
+            created_at: Some(chrono::Utc::now()),
+            last_parsed_at: Some(chrono::Utc::now()),
+        };
+
+        db_manager
+            .create_test_session(&session)
+            .map_err(|e| format!("Failed to create session: {}", e))?;
+
+        db_manager
+            .insert_entries(&all_entries)
+            .map_err(|e| format!("Failed to insert entries: {}", e))?;
+
+        println!(
+            "[BLOCKING] Completed test {}: {} files, {} entries",
+            test_name,
+            html_files.len(),
+            total_entries
+        );
+
+        session_results.push((session_id, test_name, html_files.len(), total_entries));
+    }
+
+    if session_results.is_empty() {
+        return Err("No valid test sessions were created".to_string());
+    }
+
+    Ok(session_results)
 }
 
-// Parse log directory and create test session
+// Parse log directory and create test sessions
 #[tauri::command]
 async fn parse_log_directory(
     _state: State<'_, AppState>,
     directory_path: String,
-) -> Result<String, String> {
+) -> Result<Vec<String>, String> {
     println!("Starting async parse for: {}", directory_path);
-    
+
     let db_path = "logterminator.db".to_string();
-    
+
     println!("Spawning blocking task...");
-    
+
     // Run blocking work in thread pool
-    let result = tokio::task::spawn_blocking(move || {
-        parse_directory_blocking(db_path, directory_path)
-    }).await
-    .map_err(|e| format!("Task failed: {:?}", e))?;
-    
+    let result =
+        tokio::task::spawn_blocking(move || parse_directory_blocking(db_path, directory_path))
+            .await
+            .map_err(|e| format!("Task failed: {:?}", e))?;
+
     println!("Blocking task completed successfully");
-    
-    result.map(|(session_id, _, _)| session_id)
+
+    result.map(|sessions| sessions.into_iter().map(|(id, _, _, _)| id).collect())
 }
 
 // Get paginated log entries
@@ -125,14 +140,15 @@ fn get_log_entries(
     search_term: Option<String>,
 ) -> Result<(Vec<LogEntry>, usize), String> {
     let db_manager = state.db_manager.lock().unwrap();
-    db_manager.get_entries_paginated(
-        &session_id,
-        offset,
-        limit,
-        level_filter.as_deref(),
-        search_term.as_deref(),
-    )
-    .map_err(|e| format!("Database query error: {}", e))
+    db_manager
+        .get_entries_paginated(
+            &session_id,
+            offset,
+            limit,
+            level_filter.as_deref(),
+            search_term.as_deref(),
+        )
+        .map_err(|e| format!("Database query error: {}", e))
 }
 
 // Add bookmark
@@ -154,7 +170,8 @@ fn add_bookmark(
     };
 
     let db_manager = state.db_manager.lock().unwrap();
-    db_manager.add_bookmark(&bookmark)
+    db_manager
+        .add_bookmark(&bookmark)
         .map_err(|e| format!("Failed to add bookmark: {}", e))
 }
 
@@ -165,7 +182,8 @@ fn get_bookmarks(
     session_id: String,
 ) -> Result<Vec<(Bookmark, LogEntry)>, String> {
     let db_manager = state.db_manager.lock().unwrap();
-    db_manager.get_bookmarks(&session_id)
+    db_manager
+        .get_bookmarks(&session_id)
         .map_err(|e| format!("Failed to get bookmarks: {}", e))
 }
 
@@ -173,7 +191,8 @@ fn get_bookmarks(
 #[tauri::command]
 fn get_sessions(state: State<'_, AppState>) -> Result<Vec<TestSession>, String> {
     let db_manager = state.db_manager.lock().unwrap();
-    db_manager.get_sessions()
+    db_manager
+        .get_sessions()
         .map_err(|e| format!("Failed to get sessions: {}", e))
 }
 
@@ -181,7 +200,8 @@ fn get_sessions(state: State<'_, AppState>) -> Result<Vec<TestSession>, String> 
 #[tauri::command]
 fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
     let db_manager = state.db_manager.lock().unwrap();
-    db_manager.delete_session(&session_id)
+    db_manager
+        .delete_session(&session_id)
         .map_err(|e| format!("Failed to delete session: {}", e))
 }
 
@@ -189,16 +209,31 @@ fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), 
 #[tauri::command]
 fn delete_bookmark(state: State<'_, AppState>, bookmark_id: i64) -> Result<(), String> {
     let db_manager = state.db_manager.lock().unwrap();
-    db_manager.delete_bookmark(bookmark_id)
+    db_manager
+        .delete_bookmark(bookmark_id)
         .map_err(|e| format!("Failed to delete bookmark: {}", e))
+}
+
+// Get the page number for a specific log entry (for bookmark jumping)
+#[tauri::command]
+fn get_entry_page(
+    state: State<'_, AppState>,
+    entry_id: i64,
+    items_per_page: usize,
+    level_filter: Option<String>,
+    search_term: Option<String>,
+) -> Result<Option<usize>, String> {
+    let db_manager = state.db_manager.lock().unwrap();
+    db_manager
+        .get_entry_page(entry_id, items_per_page, level_filter.as_deref(), search_term.as_deref())
+        .map_err(|e| format!("Failed to get entry page: {}", e))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize database
     let db_path = "logterminator.db";
-    let db_manager = DatabaseManager::new(db_path)
-        .expect("Failed to initialize database");
+    let db_manager = DatabaseManager::new(db_path).expect("Failed to initialize database");
 
     let app_state = AppState {
         db_manager: Mutex::new(db_manager),
@@ -215,6 +250,7 @@ pub fn run() {
             add_bookmark,
             get_bookmarks,
             delete_bookmark,
+            get_entry_page,
             get_sessions,
             delete_session
         ])

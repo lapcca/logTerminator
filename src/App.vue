@@ -10,7 +10,7 @@ const bookmarks = ref([])
 const loading = ref(false)
 const loadingMessage = ref('') // 显示加载状态信息
 const searchTerm = ref('')
-const levelFilter = ref(null)
+const levelFilter = ref('ALL')
 const totalEntries = ref(0)
 const sessions = ref([])
 const showSidebar = ref(true) // 控制左侧面板显示/隐藏
@@ -18,6 +18,7 @@ const showBookmarksPanel = ref(true) // 控制书签面板展开/折叠
 const showSessionsPanel = ref(true) // 控制测试会话面板展开/折叠
 const selectedEntryIds = ref([]) // 选中的日志条目ID
 const highlightedEntryId = ref(null) // 当前高亮的条目ID
+const jumpToPage = ref(1) // 跳转到页码输入框的值
 
 // Toggle functions
 function toggleBookmarksPanel() {
@@ -46,7 +47,33 @@ const itemsPerPageOptions = [
 ]
 
 // Log levels for filtering
-const logLevels = ['ERROR', 'WARNING', 'INFO', 'DEBUG', 'TRACE']
+const logLevels = ['ALL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'TRACE']
+
+// Priority order for log levels (higher priority first)
+const levelPriority = {
+  'ERROR': 5,
+  'WARNING': 4,
+  'INFO': 3,
+  'DEBUG': 2,
+  'TRACE': 1
+}
+
+// Dynamic log levels based on current session data
+const dynamicLogLevels = computed(() => {
+  if (!currentSession.value || logEntries.value.length === 0) {
+    return ['ALL']
+  }
+  // Get unique levels from current log entries
+  const uniqueLevels = [...new Set(logEntries.value.map(entry => entry.level))]
+  // Sort by priority (higher priority first)
+  const sortedLevels = uniqueLevels.sort((a, b) => {
+    const priorityA = levelPriority[a] || 0
+    const priorityB = levelPriority[b] || 0
+    return priorityB - priorityA
+  })
+  // Add ALL option at the beginning
+  return ['ALL', ...sortedLevels]
+})
 
 // Table headers
 const headers = [
@@ -74,6 +101,9 @@ const someSelected = computed(() => {
   return logEntries.value.some(entry => selectedEntryIds.value.includes(entry.id))
 })
 
+// Computed page count
+const totalPages = computed(() => Math.ceil(totalEntries.value / options.itemsPerPage))
+
 // Open log directory
 async function openDirectory() {
   try {
@@ -87,12 +117,18 @@ async function openDirectory() {
       loading.value = true
       loadingMessage.value = '正在扫描目录...'
       selectedEntryIds.value = [] // 清空选择
-      
+
       try {
-        currentSession.value = await invoke('parse_log_directory', { directoryPath: selected })
-        loadingMessage.value = '加载完成！'
+        const sessionIds = await invoke('parse_log_directory', { directoryPath: selected })
+        loadingMessage.value = `发现 ${sessionIds.length} 个测试组`
+
         await loadSessions()
-        await refreshLogs()
+
+        if (sessionIds.length > 0) {
+          currentSession.value = sessionIds[0]
+          await refreshLogs()
+          loadingMessage.value = `加载完成！已加载 ${sessionIds.length} 个测试`
+        }
       } catch (error) {
         console.error('Error processing directory:', error)
         loadingMessage.value = ''
@@ -119,13 +155,25 @@ async function loadSessions() {
 }
 
 // Delete test session
-async function deleteSession(sessionId) {
-  if (!confirm('确定要删除此测试会话及其所有日志吗？此操作不可撤销。')) {
+async function deleteSession(sessionId, event) {
+  // Stop event propagation to prevent parent click handlers
+  if (event) {
+    event.stopPropagation()
+  }
+
+  const confirmed = confirm('确定要删除此测试会话及其所有日志吗？此操作不可撤销。')
+  console.log('Delete confirmation result:', confirmed, 'for session:', sessionId)
+
+  if (!confirmed) {
+    console.log('Session deletion cancelled by user')
     return
   }
-  
+
   try {
+    console.log('Proceeding to delete session:', sessionId)
     await invoke('delete_session', { sessionId })
+    console.log('Session deleted successfully:', sessionId)
+
     // If deleting current session, clear it
     if (currentSession.value === sessionId) {
       currentSession.value = ''
@@ -157,6 +205,7 @@ async function refreshLogs() {
     const [entries, total] = result
     logEntries.value = entries || []
     totalEntries.value = total || 0
+    console.log('Total entries from backend:', total, 'Items per page:', options.itemsPerPage, 'Calculated totalPages:', Math.ceil(total / options.itemsPerPage))
 
     await loadBookmarks()
   } catch (error) {
@@ -304,6 +353,46 @@ function handlePagination() {
   refreshLogs()
 }
 
+// Go to specific page
+function goToPage(page) {
+  if (page >= 1 && page <= totalPages.value) {
+    options.page = page
+    refreshLogs()
+  }
+}
+
+// Execute page jump from input field
+function executeJump() {
+  let targetPage = jumpToPage.value
+  if (targetPage < 1) targetPage = 1
+  if (targetPage > totalPages.value) targetPage = totalPages.value
+  goToPage(targetPage)
+  jumpToPage.value = targetPage
+}
+
+// Calculate visible page numbers for pagination
+function visiblePageNumbers(currentPage, totalPages) {
+  const pages = []
+  const delta = 2 // Number of pages to show around current page
+  
+  if (totalPages <= 7) {
+    // Show all pages if total is small
+    for (let i = 2; i < totalPages; i++) {
+      pages.push(i)
+    }
+  } else {
+    // Show pages around current page
+    const start = Math.max(2, currentPage - delta)
+    const end = Math.min(totalPages - 1, currentPage + delta)
+    
+    for (let i = start; i <= end; i++) {
+      pages.push(i)
+    }
+  }
+  
+  return pages
+}
+
 // Debounced search
 let searchTimeout
 function debouncedSearch() {
@@ -316,35 +405,39 @@ function debouncedSearch() {
 
 // Jump to bookmark with animation
 async function jumpToBookmark(bookmark) {
-  const bookmarkData = bookmark[1]
-  if (!bookmarkData || !bookmarkData.timestamp) return
+  const bookmarkInfo = bookmark[0] // Bookmark object
+  const bookmarkData = bookmark[1] // LogEntry object
+
+  if (!bookmarkInfo || !bookmarkData || !bookmarkData.id) return
 
   try {
-    // Find the entry in current page first
-    let targetEntry = logEntries.value.find(e => e.timestamp === bookmarkData.timestamp)
-    
-    if (!targetEntry) {
-      // Need to search in database - for now, show message
-      alert(`未在当前页面找到该书签对应的日志条目`)
+    // Get the page number for this entry
+    const entryPage = await invoke('get_entry_page', {
+      entryId: bookmarkData.id,
+      itemsPerPage: options.itemsPerPage,
+      levelFilter: levelFilter.value,
+      searchTerm: searchTerm.value
+    })
+
+    if (entryPage === null) {
+      alert('书签对应的日志条目不存在')
       return
     }
 
-    // Calculate target page
-    const entryIndex = logEntries.value.findIndex(e => e.timestamp === bookmarkData.timestamp)
-    const targetPage = Math.floor(entryIndex / options.itemsPerPage) + 1
-    
-    // Navigate to page if needed
-    if (targetPage !== options.page) {
-      options.page = targetPage
+    // Navigate to the correct page
+    if (entryPage !== options.page) {
+      options.page = entryPage
       await refreshLogs()
       // Wait for render then highlight
       await nextTick()
-      setTimeout(() => highlightAndScroll(targetEntry.id), 150)
+      setTimeout(() => highlightAndScroll(bookmarkData.id), 150)
     } else {
-      highlightAndScroll(targetEntry.id)
+      // Already on correct page, just highlight
+      highlightAndScroll(bookmarkData.id)
     }
   } catch (error) {
     console.error('Error jumping to bookmark:', error)
+    alert('跳转到书签时出错')
   }
 }
 
@@ -372,6 +465,13 @@ function isHighlighted(entryId) {
 // Load sessions on mount
 onMounted(() => {
   loadSessions()
+})
+
+// Watch dynamicLogLevels and reset levelFilter if current selection is not available
+watch(dynamicLogLevels, (newLevels) => {
+  if (levelFilter.value !== 'ALL' && !newLevels.includes(levelFilter.value)) {
+    levelFilter.value = 'ALL'
+  }
 })
 </script>
 
@@ -515,7 +615,7 @@ onMounted(() => {
                         v-for="session in sessions"
                         :key="session.id"
                         :class="{ 'bg-primary-lighten-5': currentSession === session.id }"
-                        @click="currentSession = session.id; refreshLogs()"
+                        @click="currentSession = session.id; levelFilter = 'ALL'; refreshLogs()"
                         class="session-item px-3"
                         rounded="sm">
                         <template v-slot:prepend>
@@ -542,7 +642,7 @@ onMounted(() => {
                             variant="text"
                             size="small"
                             color="grey"
-                            @click.stop="deleteSession(session.id)"
+                            @click.stop="deleteSession(session.id, $event)"
                             title="删除会话">
                             <v-icon size="small">mdi-delete</v-icon>
                           </v-btn>
@@ -582,9 +682,8 @@ onMounted(() => {
                   <v-col cols="12" md="2">
                     <v-select
                       v-model="levelFilter"
-                      :items="logLevels"
+                      :items="dynamicLogLevels"
                       label="日志级别"
-                      clearable
                       variant="outlined"
                       density="comfortable"
                       prepend-inner-icon="mdi-filter"
@@ -618,213 +717,261 @@ onMounted(() => {
               </v-card-text>
             </v-card>
 
-            <!-- Selected Actions Bar (shown when items selected) -->
-            <v-expand-transition>
-              <v-card 
-                v-if="selectedEntryIds.length > 0" 
-                class="mb-3" 
-                elevation="2"
-                color="primary"
-                variant="elevated">
-                <v-card-text class="py-3 px-4 d-flex align-center">
-                  <v-icon class="mr-3">mdi-checkbox-multiple-marked</v-icon>
-                  <span class="font-weight-medium mr-4">
-                    已选择 {{ selectedEntryIds.length }} 条记录
-                  </span>
-                  <v-spacer></v-spacer>
-                  <v-btn
-                    color="white"
-                    variant="outlined"
-                    class="mr-2"
-                    prepend-icon="mdi-bookmark-plus"
-                    @click="addBookmarksForSelected">
-                    添加书签
-                  </v-btn>
-                  <v-btn
-                    color="white"
-                    variant="text"
-                    prepend-icon="mdi-close"
-                    @click="clearSelection">
-                    取消选择
-                  </v-btn>
-                </v-card-text>
-              </v-card>
-            </v-expand-transition>
 
-            <!-- Log Entries Table -->
-            <v-card elevation="2">
-              <v-card-title class="d-flex align-center py-3 px-4 bg-blue-lighten-5">
-                <v-icon color="blue" class="mr-2">mdi-format-list-bulleted</v-icon>
-                <span class="font-weight-medium">日志条目</span>
-                <v-chip size="small" color="blue" variant="flat" class="ml-3">
-                  {{ totalEntries }} 条
-                </v-chip>
-                <v-spacer></v-spacer>
-                <span v-if="selectedEntryIds.length > 0" class="text-body-2 text-grey-darken-1">
-                  已选 {{ selectedEntryIds.length }}
-                </span>
-              </v-card-title>
-              
-              <v-divider></v-divider>
-              
-              <v-card-text class="pa-0">
-                <v-data-table-server
-                  v-model="selectedEntryIds"
-                  :headers="headers"
-                  :items="logEntries"
-                  :loading="loading"
-                  :items-length="totalEntries"
-                  :options.sync="options"
-                  @update:options="handlePagination"
-                  show-select
-                  show-pagination
-                  item-value="id"
-                  class="log-table elevation-0"
-                  density="comfortable"
-                  fixed-header
-                  hover
-                  :height="showSidebar ? 'calc(100vh - 340px)' : 'calc(100vh - 220px)'">
+             <v-data-table-server
+               v-model="selectedEntryIds"
+               :headers="headers"
+               :items="logEntries"
+               :loading="loading"
+               :items-length="totalEntries"
+               :options.sync="options"
+               @update:options="handlePagination"
+               show-select
+               show-pagination
+               item-value="id"
+               class="log-table"
+               density="comfortable"
+               fixed-header
+               hover
+               :height="showSidebar ? 'calc(100vh - 280px)' : 'calc(100vh - 160px)'">
 
-                  <!-- Pagination info slot -->
-                  <template v-slot:bottom="{ page, pageCount, prevPage, nextPage, setPage }">
-                    <div class="d-flex align-center justify-center pa-3" style="width: 100%;">
-                      <v-btn
-                        icon
-                        variant="text"
-                        size="small"
-                        :disabled="page === 1"
-                        @click="prevPage"
-                        class="mr-2">
-                        <v-icon>mdi-chevron-left</v-icon>
-                      </v-btn>
-                      <span class="text-body-2 mx-3">
-                        第 {{ page }} / {{ pageCount }} 页
-                      </span>
-                      <v-btn
-                        icon
-                        variant="text"
-                        size="small"
-                        :disabled="page === pageCount"
-                        @click="nextPage"
-                        class="mr-4">
-                        <v-icon>mdi-chevron-right</v-icon>
-                      </v-btn>
-                      <v-divider vertical class="mx-2"></v-divider>
-                      <span class="text-body-2 text-grey">
-                        共 {{ totalEntries }} 条记录
-                      </span>
-                    </div>
-                  </template>
+               <!-- Pagination info slot -->
+               <template v-slot:bottom="{ page, pageCount, prevPage, nextPage }">
+                 <div class="d-flex align-center pa-3" style="width: 100%;">
+                   <v-btn
+                     icon
+                     variant="text"
+                     size="small"
+                     :disabled="options.page === 1"
+                     @click="goToPage(options.page - 1)"
+                     class="mr-2">
+                     <v-icon>mdi-chevron-left</v-icon>
+                   </v-btn>
 
-                  <!-- Select All Checkbox -->
-                  <template v-slot:header.data-table-select="{ on, modelValue, someSelected, allSelected }">
-                    <v-checkbox
-                      :model-value="allSelected"
-                      :indeterminate="someSelected && !allSelected"
-                      color="primary"
-                      hide-details
-                      @update:model-value="(val) => {
-                        if (val) toggleSelectAll()
-                        else if (someSelected) toggleSelectAll()
-                      }">
-                    </v-checkbox>
-                  </template>
+                   <!-- Page number buttons -->
+                   <div class="d-flex align-center mx-1">
+                     <v-btn
+                       variant="text"
+                       size="small"
+                       :class="{ 'bg-primary-lighten-5': options.page === 1 }"
+                       min-width="32"
+                       @click="goToPage(1)"
+                       :disabled="options.page === 1">
+                       1
+                     </v-btn>
 
-                  <!-- Row with click selection -->
-                  <template v-slot:item="{ item, isSelected, toggleSelect }">
-                    <tr 
-                      :data-entry-id="item.id"
-                      :class="{
-                        'table-row-selected': isSelected,
-                        'table-row-highlighted': isHighlighted(item.id),
-                        'cursor-pointer': true
-                      }"
-                      @click="toggleRowSelection(item)">
-                      <!-- Checkbox cell -->
-                      <td class="text-center" @click.stop>
-                        <v-checkbox
-                          :model-value="isSelected"
-                          color="primary"
-                          hide-details
-                          @update:model-value="toggleSelect">
-                        </v-checkbox>
-                      </td>
-                      <!-- Timestamp -->
-                      <td>
-                        <span class="font-mono text-body-2">{{ item.timestamp }}</span>
-                      </td>
-                      <!-- Level -->
-                      <td>
-                        <v-chip
-                          :color="getLevelColor(item.level)"
-                          size="small"
-                          variant="flat"
-                          class="font-weight-medium">
-                          {{ item.level }}
-                        </v-chip>
-                      </td>
-                      <!-- Stack -->
-                      <td>
-                        <v-tooltip 
-                          location="top" 
-                          open-on-hover
-                          close-on-content-click="false"
-                          :open-delay="200"
-                          :close-delay="300"
-                          transition="fade-transition"
-                          :disabled="!item.stack">
-                          <template v-slot:activator="{ props }">
-                            <span 
-                              v-bind="props" 
-                              class="text-truncate d-block font-mono text-caption stack-cell"
-                              :class="{ 'has-stack': item.stack }"
-                              style="max-width: 240px; color: #666; display: block; min-height: 20px;">
-                              {{ formatStack(item.stack) }}
-                            </span>
-                          </template>
-                          <v-card v-if="item.stack" class="stack-tooltip-card" max-width="600" max-height="400" style="background: rgba(33,33,33,0.98);">
-                            <v-card-text class="font-mono text-caption pa-3" style="color: #e0e0e0; white-space: pre-wrap; overflow-y: auto; max-height: 380px;">
-                              {{ item.stack }}
-                            </v-card-text>
-                          </v-card>
-                        </v-tooltip>
-                      </td>
-                      <!-- Message -->
-                      <td>
-                        <div 
-                          class="text-body-2 text-wrap" 
-                          style="word-break: break-word;">
-                          {{ item.message }}
-                        </div>
-                      </td>
-                      <!-- Bookmark action -->
-                      <td class="text-center" @click.stop>
-                        <v-btn
-                          :icon="isBookmarked(item.id) ? 'mdi-star' : 'mdi-star-outline'"
-                          :color="isBookmarked(item.id) ? 'amber' : 'grey'"
-                          :variant="isBookmarked(item.id) ? 'flat' : 'text'"
-                          size="small"
-                          @click="toggleBookmark(item)"
-                          :title="isBookmarked(item.id) ? '取消书签' : '添加书签'">
-                        </v-btn>
-                      </td>
-                    </tr>
-                  </template>
+                     <v-btn
+                       v-if="options.page > 3"
+                       variant="text"
+                       size="small"
+                       disabled
+                       min-width="32"
+                       class="px-1">
+                       ...
+                     </v-btn>
 
-                  <!-- Empty state -->
-                  <template v-slot:no-data>
-                    <div class="text-center pa-8">
-                      <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-text-search</v-icon>
-                      <div class="text-h6 text-grey">暂无日志数据</div>
-                      <div class="text-body-2 text-grey-darken-1 mt-2">
-                        点击右上角"打开目录"加载日志文件
-                      </div>
-                    </div>
-                  </template>
+                     <v-btn
+                       v-for="p in visiblePageNumbers(options.page, totalPages)"
+                       :key="p"
+                       variant="text"
+                       size="small"
+                       :class="{ 'bg-primary-lighten-5': options.page === p }"
+                       min-width="32"
+                       @click="goToPage(p)">
+                       {{ p }}
+                     </v-btn>
 
-                </v-data-table-server>
-              </v-card-text>
-            </v-card>
+                     <v-btn
+                       v-if="options.page < totalPages - 2"
+                       variant="text"
+                       size="small"
+                       disabled
+                       min-width="32"
+                       class="px-1">
+                       ...
+                     </v-btn>
+
+                     <v-btn
+                       v-if="totalPages > 1"
+                       variant="text"
+                       size="small"
+                       :class="{ 'bg-primary-lighten-5': options.page === totalPages }"
+                       min-width="32"
+                       @click="goToPage(totalPages)"
+                       :disabled="options.page === totalPages">
+                       {{ totalPages }}
+                     </v-btn>
+                   </div>
+
+                   <v-btn
+                     icon
+                     variant="text"
+                     size="small"
+                     :disabled="options.page === totalPages"
+                     @click="goToPage(options.page + 1)"
+                     class="mr-4 ml-2">
+                     <v-icon>mdi-chevron-right</v-icon>
+                   </v-btn>
+
+                   <v-divider vertical class="mx-2"></v-divider>
+
+                   <!-- Page jump input -->
+                   <div class="d-flex align-center mx-3">
+                     <span class="text-body-2 mr-2">跳转到</span>
+                     <v-text-field
+                       v-model.number="jumpToPage"
+                       @keyup.enter="executeJump()"
+                       variant="outlined"
+                       density="compact"
+                       hide-details
+                       single-line
+                       style="width: 60px;"
+                       type="number"
+                       :min="1"
+                       :max="totalPages">
+                     </v-text-field>
+                     <span class="text-body-2 ml-2">页</span>
+                   </div>
+
+                   <v-divider vertical class="mx-2"></v-divider>
+                   <span class="text-body-2 text-grey ml-2">
+                     共 {{ totalEntries }} 条记录
+                   </span>
+                 </div>
+               </template>
+
+               <!-- Select All Checkbox -->
+               <template v-slot:header.data-table-select="{ on, modelValue, someSelected, allSelected }">
+                 <v-checkbox
+                   :model-value="allSelected"
+                   :indeterminate="someSelected && !allSelected"
+                   color="primary"
+                   hide-details
+                   @update:model-value="(val) => {
+                     if (val) toggleSelectAll()
+                     else if (someSelected) toggleSelectAll()
+                   }">
+                 </v-checkbox>
+               </template>
+
+               <!-- Row with click selection -->
+               <template v-slot:item="{ item, isSelected, toggleSelect }">
+                 <tr
+                   :data-entry-id="item.id"
+                   :class="{
+                     'table-row-selected': isSelected,
+                     'table-row-highlighted': isHighlighted(item.id),
+                     'cursor-pointer': true
+                   }"
+                   @click="toggleRowSelection(item)">
+                   <!-- Checkbox cell -->
+                   <td class="text-center" @click.stop>
+                     <v-checkbox
+                       :model-value="isSelected"
+                       color="primary"
+                       hide-details
+                       @update:model-value="toggleSelect">
+                     </v-checkbox>
+                   </td>
+                   <!-- Timestamp -->
+                   <td>
+                     <span class="font-mono text-body-2">{{ item.timestamp }}</span>
+                   </td>
+                   <!-- Level -->
+                   <td>
+                     <v-chip
+                       :color="getLevelColor(item.level)"
+                       size="small"
+                       variant="flat"
+                       class="font-weight-medium">
+                       {{ item.level }}
+                     </v-chip>
+                   </td>
+                   <!-- Stack -->
+                   <td>
+                     <v-tooltip
+                       location="top"
+                       open-on-hover
+                       close-on-content-click="false"
+                       :open-delay="200"
+                       :close-delay="300"
+                       transition="fade-transition"
+                       :disabled="!item.stack"
+                       interactive>
+                       <template v-slot:activator="{ props }">
+                         <span
+                           v-bind="props"
+                           class="text-truncate d-block font-mono text-caption stack-cell"
+                           :class="{ 'has-stack': item.stack }"
+                           style="max-width: 240px; color: #666; display: block; min-height: 20px;">
+                           {{ formatStack(item.stack) }}
+                         </span>
+                       </template>
+                       <v-card v-if="item.stack" class="stack-tooltip-card" max-width="600" max-height="400" style="background: white;">
+                         <v-card-title class="tooltip-header py-2 px-4" style="font-size: 13px; font-weight: 500; border-bottom: 1px solid rgba(0,0,0,0.08);">
+                           <v-icon size="14" class="mr-2" style="color: #ffa726;">mdi-layers-stack</v-icon>
+                           Stack Trace
+                         </v-card-title>
+                         <v-card-text class="font-mono text-caption tooltip-content pa-4" style="color: #424242; white-space: pre-wrap; overflow-y: auto; max-height: 340px;">
+                           {{ item.stack }}
+                         </v-card-text>
+                       </v-card>
+                     </v-tooltip>
+                   </td>
+                   <!-- Message -->
+                   <td>
+                     <v-tooltip
+                       location="bottom"
+                       max-width="800"
+                       :open-delay="200"
+                       :close-delay="300"
+                       transition="fade-transition"
+                       interactive>
+                       <template v-slot:activator="{ props }">
+                         <div
+                           v-bind="props"
+                           class="text-body-2 text-wrap message-cell"
+                           style="word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
+                           {{ item.message }}
+                         </div>
+                       </template>
+                       <v-card class="message-tooltip-card" max-width="800" max-height="500" style="background: white;">
+                         <v-card-title class="tooltip-header py-2 px-4" style="font-size: 13px; font-weight: 500; border-bottom: 1px solid rgba(0,0,0,0.08);">
+                           <v-icon size="14" class="mr-2" style="color: #42a5f5;">mdi-message-text</v-icon>
+                           Message
+                         </v-card-title>
+                         <v-card-text class="text-body-2 tooltip-content pa-4" style="color: #424242; white-space: pre-wrap; overflow-y: auto; max-height: 440px;">
+                           {{ item.message }}
+                         </v-card-text>
+                       </v-card>
+                     </v-tooltip>
+                   </td>
+                   <!-- Bookmark action -->
+                   <td class="text-center" @click.stop>
+                     <v-btn
+                       :icon="isBookmarked(item.id) ? 'mdi-star' : 'mdi-star-outline'"
+                       :color="isBookmarked(item.id) ? 'amber' : 'grey'"
+                       :variant="isBookmarked(item.id) ? 'flat' : 'text'"
+                       size="small"
+                       @click="toggleBookmark(item)"
+                       :title="isBookmarked(item.id) ? '取消书签' : '添加书签'">
+                     </v-btn>
+                   </td>
+                 </tr>
+               </template>
+
+               <!-- Empty state -->
+               <template v-slot:no-data>
+                 <div class="text-center pa-8">
+                   <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-text-search</v-icon>
+                   <div class="text-h6 text-grey">暂无日志数据</div>
+                   <div class="text-body-2 text-grey-darken-1 mt-2">
+                     点击右上角"打开目录"加载日志文件
+                   </div>
+                 </div>
+               </template>
+
+             </v-data-table-server>
           </v-col>
         </v-row>
       </v-container>
@@ -920,13 +1067,58 @@ onMounted(() => {
 
 /* Stack tooltip card styling */
 .stack-tooltip-card {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+
+/* Message tooltip card styling */
+.message-tooltip-card {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+
+/* Tooltip header styling */
+.tooltip-header {
+  background: linear-gradient(135deg, #e3f2fd 0%, #f5f5f5 100%);
+  color: #424242;
+  letter-spacing: 0.3px;
+}
+
+/* Tooltip content styling */
+.tooltip-content {
+  line-height: 1.6;
+  padding: 16px;
+  background: #fafafa;
+}
+
+/* Custom scrollbar for tooltip content */
+.tooltip-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.tooltip-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+.tooltip-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  transition: background 0.2s ease;
+}
+
+.tooltip-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
 
 /* Ensure tooltip content is readable */
-.stack-tooltip-card .v-card-text {
+.stack-tooltip-card .v-card-text,
+.message-tooltip-card .v-card-text {
   line-height: 1.5;
 }
 
