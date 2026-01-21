@@ -1,6 +1,6 @@
+use chrono::{DateTime, Utc};
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,47 +81,43 @@ impl HtmlLogParser {
 
         let mut entries = Vec::new();
         let mut line_number = 0;
-        let mut rows_processed = 0;
-        let mut rows_with_date = 0;
-        let mut rows_skipped_no_date = 0;
-        let mut rows_skipped_header = 0;
 
         for row in document.select(&row_selector) {
-            // Skip header row (has th elements)
             if row.select(&th_selector).next().is_some() {
-                rows_skipped_header += 1;
                 line_number += 1;
                 continue;
             }
 
-            // Extract timestamp from td.date
             let timestamp_text = if let Some(sel) = &date_selector {
-                row.select(sel).next()
+                row.select(sel)
+                    .next()
                     .map(|el| el.text().collect::<String>().trim().to_string())
                     .unwrap_or_default()
             } else {
-                row.select(&td_any_selector).next()
+                row.select(&td_any_selector)
+                    .next()
                     .map(|el| el.text().collect::<String>().trim().to_string())
                     .unwrap_or_default()
             };
 
             if timestamp_text.is_empty() || timestamp_text == "Timestamp" {
-                rows_skipped_no_date += 1;
                 line_number += 1;
                 continue;
             }
 
-            rows_with_date += 1;
-
-            // Extract level from td.level
+            // Extract level from td.level and remove surrounding brackets
             let level_text = if let Some(sel) = &level_selector {
-                row.select(sel).next()
+                row.select(sel)
+                    .next()
                     .map(|el| el.text().collect::<String>().trim().to_string())
+                    .map(|s| s.trim_matches(&['[', ']'] as &[char]).to_string())
                     .unwrap_or_default()
             } else {
                 let cells: Vec<_> = row.select(&td_any_selector).collect();
                 if cells.len() > 1 {
                     cells[1].text().collect::<String>().trim().to_string()
+                        .trim_matches(&['[', ']'] as &[char])
+                        .to_string()
                 } else {
                     String::new()
                 }
@@ -129,13 +125,18 @@ impl HtmlLogParser {
 
             // Extract message from td.message
             let message_text = if let Some(sel) = &message_selector {
-                row.select(sel).next()
+                row.select(sel)
+                    .next()
                     .map(|el| el.text().collect::<String>().trim().to_string())
                     .unwrap_or_default()
             } else {
                 let cells: Vec<_> = row.select(&td_any_selector).collect();
                 if !cells.is_empty() {
-                    cells[cells.len() - 1].text().collect::<String>().trim().to_string()
+                    cells[cells.len() - 1]
+                        .text()
+                        .collect::<String>()
+                        .trim()
+                        .to_string()
                 } else {
                     String::new()
                 }
@@ -143,7 +144,8 @@ impl HtmlLogParser {
 
             // Try to find hidden stack trace
             let stack_text = if let Some(sel) = &stack_selector {
-                row.select(sel).next()
+                row.select(sel)
+                    .next()
                     .map(|el| el.text().collect::<String>().trim().to_string())
                     .unwrap_or_default()
             } else {
@@ -171,30 +173,61 @@ impl HtmlLogParser {
         Ok(entries)
     }
 
-    pub fn scan_html_files(directory_path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-        let mut html_files = Vec::new();
+    pub fn scan_html_files(
+        directory_path: &str,
+    ) -> Result<std::collections::HashMap<String, Vec<String>>, Box<dyn std::error::Error>> {
+        use std::collections::HashMap;
 
-        for entry in WalkDir::new(directory_path).into_iter().filter_map(|e| e.ok()) {
+        let mut test_groups: HashMap<String, Vec<String>> = HashMap::new();
+        let mut ignored_files = Vec::new();
+
+        for entry in WalkDir::new(directory_path)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             let path = entry.path();
             if path.is_file() {
                 if let Some(extension) = path.extension() {
                     if extension == "html" {
                         if let Some(path_str) = path.to_str() {
-                            html_files.push(path_str.to_string());
+                            if let Some(test_name) = Self::extract_test_name(path_str) {
+                                test_groups
+                                    .entry(test_name)
+                                    .or_default()
+                                    .push(path_str.to_string());
+                            } else {
+                                ignored_files.push(path_str.to_string());
+                            }
                         }
                     }
                 }
             }
         }
 
-        html_files.sort_by(|a, b| {
-            let a_index = Self::extract_file_index(a);
-            let b_index = Self::extract_file_index(b);
-            a_index.cmp(&b_index)
-        });
+        for (_, files) in test_groups.iter_mut() {
+            files.sort_by(|a, b| {
+                let a_index = Self::extract_file_index(a);
+                let b_index = Self::extract_file_index(b);
+                a_index.cmp(&b_index)
+            });
+        }
 
-        println!("Found {} HTML files in {}", html_files.len(), directory_path);
-        Ok(html_files)
+        if !ignored_files.is_empty() {
+            println!("Ignored {} non-test HTML files", ignored_files.len());
+            for file in ignored_files.iter().take(5) {
+                println!("  - {}", file);
+            }
+            if ignored_files.len() > 5 {
+                println!("  - ... and {} more", ignored_files.len() - 5);
+            }
+        }
+
+        println!(
+            "Found {} test groups with {} total files",
+            test_groups.len(),
+            test_groups.values().map(|v| v.len()).sum::<usize>()
+        );
+        Ok(test_groups)
     }
 
     pub fn extract_file_index(file_path: &str) -> usize {
@@ -213,5 +246,69 @@ impl HtmlLogParser {
             }
         }
         0
+    }
+
+    /// Validates if a filename matches the test log pattern and extracts the test name.
+    ///
+    /// The pattern expected is: `<TestName>_<ID_X>---<Y>.html`
+    ///
+    /// # Arguments
+    /// * `filename` - The filename to validate (without path)
+    ///
+    /// # Returns
+    /// * `Some(String)` - The test name if filename matches the pattern
+    /// * `None` - If filename doesn't match the pattern
+    ///
+    /// # Examples
+    /// ```
+    /// assert_eq!(
+    ///     HtmlLogParser::is_test_log_file("TestEnableTcpdump_ID_1---0.html"),
+    ///     Some("TestEnableTcpdump_ID_1".to_string())
+    /// );
+    /// assert_eq!(
+    ///     HtmlLogParser::is_test_log_file("MainRollup.html"),
+    ///     None
+    /// );
+    /// ```
+    pub fn is_test_log_file(filename: &str) -> Option<String> {
+        // Check if filename ends with .html
+        if !filename.ends_with(".html") {
+            return None;
+        }
+
+        let dash_pos = filename.rfind("---")?;
+        let after_dash = &filename[dash_pos + 3..];
+        let dot_pos = after_dash.find(".html")?;
+
+        let index_str = &after_dash[..dot_pos];
+        index_str.parse::<usize>().ok()?;
+
+        let test_name_part = &filename[..dash_pos];
+
+        let id_pos = test_name_part.rfind("_ID_")?;
+        if id_pos == 0 {
+            return None;
+        }
+
+        Some(test_name_part.to_string())
+    }
+
+    /// Extracts the test name from a file path.
+    ///
+    /// # Arguments
+    /// * `file_path` - The full path to the file
+    ///
+    /// # Returns
+    /// * `Some(String)` - The test name if it's a valid test log file
+    /// * `None` - If the file doesn't match the test log pattern
+    pub fn extract_test_name(file_path: &str) -> Option<String> {
+        use std::path::Path;
+
+        if let Some(filename) = Path::new(file_path).file_name() {
+            if let Some(filename_str) = filename.to_str() {
+                return Self::is_test_log_file(filename_str);
+            }
+        }
+        None
     }
 }

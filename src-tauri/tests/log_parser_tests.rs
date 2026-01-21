@@ -6,10 +6,109 @@ mod tests {
 
     #[test]
     fn test_extract_file_index() {
-        assert_eq!(HtmlLogParser::extract_file_index("TestEnableTcpdump_ID_1---0.html"), 0);
-        assert_eq!(HtmlLogParser::extract_file_index("TestEnableTcpdump_ID_1---10.html"), 10);
+        assert_eq!(
+            HtmlLogParser::extract_file_index("TestEnableTcpdump_ID_1---0.html"),
+            0
+        );
+        assert_eq!(
+            HtmlLogParser::extract_file_index("TestEnableTcpdump_ID_1---10.html"),
+            10
+        );
         assert_eq!(HtmlLogParser::extract_file_index("test---5.html"), 5);
         assert_eq!(HtmlLogParser::extract_file_index("no_index.html"), 0);
+    }
+
+    #[test]
+    fn test_is_test_log_file_valid() {
+        assert_eq!(
+            HtmlLogParser::is_test_log_file("TestEnableTcpdump_ID_1---0.html"),
+            Some("TestEnableTcpdump_ID_1".to_string())
+        );
+        assert_eq!(
+            HtmlLogParser::is_test_log_file("TestABC_ID_1---0.html"),
+            Some("TestABC_ID_1".to_string())
+        );
+        assert_eq!(
+            HtmlLogParser::is_test_log_file("TestABC_ID_1---10.html"),
+            Some("TestABC_ID_1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_is_test_log_file_invalid() {
+        assert_eq!(HtmlLogParser::is_test_log_file("MainRollup.html"), None);
+        assert_eq!(HtmlLogParser::is_test_log_file("summary.html"), None);
+        assert_eq!(
+            HtmlLogParser::is_test_log_file("TestEnableTcpdump_ID_1.html"),
+            None
+        );
+        assert_eq!(
+            HtmlLogParser::is_test_log_file("TestEnableTcpdump_ID_1---abc.html"),
+            None
+        );
+        assert_eq!(HtmlLogParser::is_test_log_file("_ID_1---0.html"), None);
+    }
+
+    #[test]
+    fn test_extract_test_name() {
+        assert_eq!(
+            HtmlLogParser::extract_test_name("/path/to/TestEnableTcpdump_ID_1---0.html"),
+            Some("TestEnableTcpdump_ID_1".to_string())
+        );
+        assert_eq!(
+            HtmlLogParser::extract_test_name("/path/to/MainRollup.html"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_scan_and_group_files() {
+        use std::fs;
+        use std::path::PathBuf;
+
+        let temp_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+        let dir_path = temp_dir.path();
+
+        let test_files = vec![
+            "TestEnableTcpdump_ID_1---0.html",
+            "TestEnableTcpdump_ID_1---1.html",
+            "TestABC_ID_1---0.html",
+            "TestABC_ID_1---1.html",
+            "TestABC_ID_1---2.html",
+            "MainRollup.html",
+        ];
+
+        for file_name in test_files {
+            let file_path = dir_path.join(file_name);
+            let html_content = r#"<!DOCTYPE html><html><body><table><tr><td>2026/01/14 07:17:37</td><td>INFO</td><td>Test message</td></tr></table></body></html>"#;
+            fs::write(&file_path, html_content).expect("Failed to write test file");
+        }
+
+        let result = HtmlLogParser::scan_html_files(dir_path.to_str().unwrap());
+        assert!(result.is_ok());
+
+        let groups = result.unwrap();
+
+        assert_eq!(groups.len(), 2);
+
+        assert!(groups.contains_key("TestEnableTcpdump_ID_1"));
+        let tcpdump_files = &groups["TestEnableTcpdump_ID_1"];
+        assert_eq!(tcpdump_files.len(), 2);
+        assert!(tcpdump_files[0].ends_with("TestEnableTcpdump_ID_1---0.html"));
+        assert!(tcpdump_files[1].ends_with("TestEnableTcpdump_ID_1---1.html"));
+
+        assert!(groups.contains_key("TestABC_ID_1"));
+        let abc_files = &groups["TestABC_ID_1"];
+        assert_eq!(abc_files.len(), 3);
+        assert!(abc_files[0].ends_with("TestABC_ID_1---0.html"));
+        assert!(abc_files[1].ends_with("TestABC_ID_1---1.html"));
+        assert!(abc_files[2].ends_with("TestABC_ID_1---2.html"));
+
+        for files in groups.values() {
+            for file in files {
+                assert!(!file.contains("MainRollup"));
+            }
+        }
     }
 
     #[test]
@@ -47,7 +146,7 @@ mod tests {
         assert!(result.is_ok());
         let entries = result.unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].level, "[INFO]");
+        assert_eq!(entries[0].level, "INFO");
         assert_eq!(entries[0].timestamp, "2026/01/14 07:17:37,370 UTC");
         assert!(entries[0].message.contains("Test message"));
     }
@@ -102,20 +201,20 @@ test_module.test_function -- 123</td><td class="message"><pre class="ERROR">Conn
         assert_eq!(entries.len(), 4);
 
         // Check first entry
-        assert_eq!(entries[0].level, "[INFO]");
+        assert_eq!(entries[0].level, "INFO");
         assert_eq!(entries[0].timestamp, "2026/01/14 07:17:37,370 UTC");
         assert!(entries[0].message.contains("Package version info"));
 
         // Check second entry
-        assert_eq!(entries[1].level, "[DEBUG]");
+        assert_eq!(entries[1].level, "DEBUG");
         assert_eq!(entries[1].timestamp, "2026/01/14 07:17:37,374 UTC");
 
         // Check third entry
-        assert_eq!(entries[2].level, "[WARNING]");
+        assert_eq!(entries[2].level, "WARNING");
         assert!(entries[2].message.contains("PYTEST_DATA_COLLECTION"));
 
         // Check fourth entry
-        assert_eq!(entries[3].level, "[ERROR]");
+        assert_eq!(entries[3].level, "ERROR");
         assert!(entries[3].message.contains("Connection failed"));
     }
 }

@@ -1,5 +1,5 @@
-use rusqlite::{Connection, params, Result as SqlResult};
-use crate::log_parser::{LogEntry, Bookmark, TestSession};
+use crate::log_parser::{Bookmark, LogEntry, TestSession};
+use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 pub struct DatabaseManager {
     conn: Connection,
@@ -60,10 +60,22 @@ impl DatabaseManager {
         )?;
 
         // Create indexes for performance
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_session ON log_entries(test_session_id)", [])?;
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_timestamp ON log_entries(timestamp)", [])?;
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_level ON log_entries(level)", [])?;
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_bookmarks_entry ON bookmarks(log_entry_id)", [])?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entries_session ON log_entries(test_session_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entries_timestamp ON log_entries(timestamp)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entries_level ON log_entries(level)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bookmarks_entry ON bookmarks(log_entry_id)",
+            [],
+        )?;
 
         Ok(())
     }
@@ -120,19 +132,26 @@ impl DatabaseManager {
         search_term: Option<&str>,
     ) -> SqlResult<(Vec<LogEntry>, usize)> {
         // Build query dynamically
-        let mut base_query = "SELECT id, file_path, file_index, timestamp, level, stack, message, line_number
-                             FROM log_entries WHERE test_session_id = ?".to_string();
+        let mut base_query =
+            "SELECT id, file_path, file_index, timestamp, level, stack, message, line_number
+                             FROM log_entries WHERE test_session_id = ?"
+                .to_string();
 
         let mut where_conditions = Vec::new();
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(session_id)];
 
         if let Some(level) = level_filter {
-            where_conditions.push("level = ?");
-            params.push(Box::new(level.to_string()));
+            // Skip empty string or "ALL" (no filtering)
+            if !level.is_empty() && level != "ALL" {
+                // Match both "ERROR" and "[ERROR]" for backward compatibility
+                where_conditions.push("(level = ? OR level = ?)");
+                params.push(Box::new(level.to_string()));
+                params.push(Box::new(format!("[{}]", level)));
+            }
         }
 
         if let Some(search) = search_term {
-            where_conditions.push("(message LIKE ? OR stack LIKE ?)");
+            where_conditions.push("(timestamp LIKE ? OR message LIKE ?)");
             let search_pattern = format!("%{}%", search);
             params.push(Box::new(search_pattern.clone()));
             params.push(Box::new(search_pattern));
@@ -146,11 +165,13 @@ impl DatabaseManager {
         // Get total count
         let count_query = base_query.replace(
             "SELECT id, file_path, file_index, timestamp, level, stack, message, line_number",
-            "SELECT COUNT(*)"
+            "SELECT COUNT(*)",
         );
 
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
-        let total: usize = self.conn.query_row(&count_query, &param_refs[..], |row| row.get(0))?;
+        let total: usize = self
+            .conn
+            .query_row(&count_query, &param_refs[..], |row| row.get(0))?;
 
         // Add pagination
         let mut query = base_query;
@@ -236,7 +257,7 @@ impl DatabaseManager {
     pub fn get_sessions(&self) -> SqlResult<Vec<TestSession>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, name, directory_path, file_count, total_entries, created_at, last_parsed_at
-             FROM test_sessions ORDER BY last_parsed_at DESC"
+             FROM test_sessions ORDER BY last_parsed_at DESC",
         )?;
 
         let session_iter = stmt.query_map([], |row| {
@@ -257,13 +278,75 @@ impl DatabaseManager {
     pub fn delete_session(&self, session_id: &str) -> SqlResult<()> {
         // Delete in correct order due to foreign key constraints
         self.conn.execute("DELETE FROM bookmarks WHERE log_entry_id IN (SELECT id FROM log_entries WHERE test_session_id = ?)", [session_id])?;
-        self.conn.execute("DELETE FROM log_entries WHERE test_session_id = ?", [session_id])?;
-        self.conn.execute("DELETE FROM test_sessions WHERE id = ?", [session_id])?;
+        self.conn.execute(
+            "DELETE FROM log_entries WHERE test_session_id = ?",
+            [session_id],
+        )?;
+        self.conn
+            .execute("DELETE FROM test_sessions WHERE id = ?", [session_id])?;
         Ok(())
     }
 
     pub fn delete_bookmark(&self, bookmark_id: i64) -> SqlResult<()> {
-        self.conn.execute("DELETE FROM bookmarks WHERE id = ?", [bookmark_id])?;
+        self.conn
+            .execute("DELETE FROM bookmarks WHERE id = ?", [bookmark_id])?;
         Ok(())
+    }
+
+    pub fn get_entry_page(
+        &self,
+        entry_id: i64,
+        items_per_page: usize,
+        level_filter: Option<&str>,
+        search_term: Option<&str>,
+    ) -> SqlResult<Option<usize>> {
+        // First get the session_id and timestamp for this entry
+        let entry_info: Option<(String, String)> = self.conn.query_row(
+            "SELECT test_session_id, timestamp FROM log_entries WHERE id = ?",
+            [entry_id],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).optional()?;
+
+        let (session_id, entry_timestamp) = match entry_info {
+            Some(info) => info,
+            None => return Ok(None), // Entry not found
+        };
+
+        // Build the same WHERE conditions as get_entries_paginated
+        let mut where_conditions = vec!["test_session_id = ?".to_string()];
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(session_id)];
+
+        if let Some(level) = level_filter {
+            // Skip empty string or "ALL" (no filtering)
+            if !level.is_empty() && level != "ALL" {
+                // Match both "ERROR" and "[ERROR]" for backward compatibility
+                where_conditions.push("(level = ? OR level = ?)".to_string());
+                params.push(Box::new(level.to_string()));
+                params.push(Box::new(format!("[{}]", level)));
+            }
+        }
+
+        if let Some(search) = search_term {
+            where_conditions.push("(timestamp LIKE ? OR message LIKE ?)".to_string());
+            let search_pattern = format!("%{}%", search);
+            params.push(Box::new(search_pattern.clone()));
+            params.push(Box::new(search_pattern));
+        }
+
+        // Count entries that come before this entry (same conditions + timestamp < entry_timestamp)
+        where_conditions.push("timestamp < ?".to_string());
+        params.push(Box::new(entry_timestamp));
+
+        let count_query = format!(
+            "SELECT COUNT(*) FROM log_entries WHERE {}",
+            where_conditions.join(" AND ")
+        );
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let count_before: usize = self.conn.query_row(&count_query, &param_refs[..], |row| row.get(0))?;
+
+        // Calculate page number (1-indexed)
+        let page = (count_before / items_per_page) + 1;
+        Ok(Some(page))
     }
 }
