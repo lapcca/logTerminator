@@ -32,3 +32,20 @@ fn test_fetcher_new() {
     let fetcher = HttpLogFetcher::new("http://example.com/logs/").unwrap();
     assert_eq!(fetcher.base_url().as_str(), "http://example.com/logs/");
 }
+
+#[test]
+fn test_filter_test_log_files() {
+    let urls = vec![
+        "http://example.com/TestABC_ID_1---0.html".to_string(),
+        "http://example.com/TestABC_ID_1---1.html".to_string(),
+        "http://example.com/MainRollup.html".to_string(),
+        "http://example.com/summary.html".to_string(),
+        "http://example.com/TestEnableTcpdump_ID_2---0.html".to_string(),
+    ];
+
+    let filtered = HttpLogFetcher::filter_test_log_files(&urls);
+    assert_eq!(filtered.len(), 3);
+    assert!(filtered.contains(&"http://example.com/TestABC_ID_1---0.html".to_string()));
+    assert!(filtered.contains(&"http://example.com/TestABC_ID_1---1.html".to_string()));
+    assert!(filtered.contains(&"http://example.com/TestEnableTcpdump_ID_2---0.html".to_string()));
+}

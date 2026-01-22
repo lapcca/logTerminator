@@ -1,6 +1,8 @@
 use reqwest::blocking::Client;
 use reqwest::Url;
 use scraper::{Html, Selector};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Errors that can occur during HTTP log fetching
@@ -123,4 +125,150 @@ impl HttpLogFetcher {
             .text()
             .map_err(|e| HttpFetchError::NetworkError(e))
     }
+
+    /// Filter URLs to only include test log files matching the pattern
+    pub fn filter_test_log_files(urls: &[String]) -> Vec<String> {
+        urls.iter()
+            .filter(|url| {
+                if let Some(filename) = url.rsplit('/').next() {
+                    crate::log_parser::HtmlLogParser::is_test_log_file(filename).is_some()
+                } else {
+                    false
+                }
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+/// Fetch all logs from HTTP server and return session IDs
+pub fn fetch_logs_from_http(
+    db_path: String,
+    url: String,
+    progress_callback: impl Fn(String),
+) -> Result<Vec<String>, HttpFetchError> {
+    use crate::database::DatabaseManager;
+    use crate::log_parser::HtmlLogParser;
+    use chrono::Utc;
+
+    progress_callback("Connecting to server...".to_string());
+
+    // Create fetcher
+    let fetcher = HttpLogFetcher::new(&url)?;
+
+    // Fetch directory listing
+    progress_callback("Parsing directory listing...".to_string());
+    let listing_html = fetcher.fetch_log_file(&fetcher.base_url().to_string())?;
+
+    // Parse directory listing
+    let all_urls = HttpLogFetcher::parse_directory_listing(&listing_html, fetcher.base_url().as_str())?;
+
+    // Filter to test log files only
+    let test_log_urls = HttpLogFetcher::filter_test_log_files(&all_urls);
+
+    if test_log_urls.is_empty() {
+        return Ok(vec![]);
+    }
+
+    progress_callback(format!("Found {} test log file(s)", test_log_urls.len()));
+
+    // Group by test session (test_name + test_id)
+    let mut session_groups: std::collections::HashMap<String, Vec<(String, usize)>> = std::collections::HashMap::new();
+    for (index, log_url) in test_log_urls.iter().enumerate() {
+        if let Some(filename) = log_url.rsplit('/').next() {
+            if let Some(test_name) = HtmlLogParser::is_test_log_file(filename) {
+                // Extract test_id from filename
+                let test_id = if let Some(start) = filename.find("ID_") {
+                    let rest = &filename[start..];
+                    if let Some(end) = rest.find("---") {
+                        rest[0..end].to_string()
+                    } else {
+                        "1".to_string()
+                    }
+                } else {
+                    "1".to_string()
+                };
+
+                let key = format!("{}_{}", test_name, test_id);
+                session_groups.entry(key).or_default().push((log_url.clone(), index));
+            }
+        }
+    }
+
+    // Initialize database
+    let mut db_manager = DatabaseManager::new(&db_path)
+        .map_err(|e| HttpFetchError::ParseError(format!("Failed to initialize database: {}", e)))?;
+
+    let mut session_ids = Vec::new();
+
+    // Download and process each session
+    let counter = Arc::new(AtomicUsize::new(0));
+    let total = session_groups.len();
+
+    for (session_key, log_files) in session_groups {
+        let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        progress_callback(format!("Processing session ({}/{})...", count, total));
+
+        // Generate session ID
+        let session_id = format!(
+            "session_{}_{}",
+            session_key.replace(|c: char| !c.is_alphanumeric() && c != '_', "_"),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        );
+
+        let mut all_entries = Vec::new();
+
+        // Download each log file in the session
+        for (file_index, (log_url, _)) in log_files.iter().enumerate() {
+            progress_callback(format!("Downloading log files ({}/{})...", count, total));
+
+            // Small delay for politeness
+            std::thread::sleep(Duration::from_millis(50));
+
+            let html_content = fetcher.fetch_log_file(log_url)?;
+
+            // Parse using HTML string parser
+            let entries = HtmlLogParser::parse_html_string(&html_content, log_url, &session_id, file_index)
+                .map_err(|e| HttpFetchError::ParseError(format!("Failed to parse {}: {}", log_url, e)))?;
+
+            all_entries.extend(entries);
+        }
+
+        if all_entries.is_empty() {
+            println!("Warning: No valid log entries found for session {}", session_key);
+            continue;
+        }
+
+        // Create test session
+        let test_session = crate::log_parser::TestSession {
+            id: session_id.clone(),
+            name: session_key.clone(),
+            directory_path: url.clone(),
+            file_count: log_files.len(),
+            total_entries: all_entries.len(),
+            created_at: Some(Utc::now()),
+            last_parsed_at: Some(Utc::now()),
+        };
+
+        db_manager
+            .create_test_session(&test_session)
+            .map_err(|e| HttpFetchError::ParseError(format!("Failed to create session: {}", e)))?;
+
+        db_manager
+            .insert_entries(&all_entries)
+            .map_err(|e| HttpFetchError::ParseError(format!("Failed to insert entries: {}", e)))?;
+
+        session_ids.push(session_id);
+
+        println!(
+            "Completed session {}: {} files, {} entries",
+            session_key,
+            log_files.len(),
+            all_entries.len()
+        );
+    }
+
+    progress_callback("Complete".to_string());
+
+    Ok(session_ids)
 }
