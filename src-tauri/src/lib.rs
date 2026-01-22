@@ -5,7 +5,7 @@ pub mod log_parser;
 use crate::database::DatabaseManager;
 use crate::log_parser::{Bookmark, HtmlLogParser, LogEntry, TestSession};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Emitter, State};
 
 // App state
 struct AppState {
@@ -128,6 +128,39 @@ async fn parse_log_directory(
     println!("Blocking task completed successfully");
 
     result.map(|sessions| sessions.into_iter().map(|(id, _, _, _)| id).collect())
+}
+
+// Parse logs from HTTP server and create test sessions
+#[tauri::command]
+async fn parse_log_http_url(
+    _state: State<'_, AppState>,
+    window: tauri::Window,
+    url: String,
+) -> Result<Vec<String>, String> {
+    println!("Starting async HTTP parse for: {}", url);
+
+    let db_path = "logterminator.db".to_string();
+
+    // Use spawn_blocking to avoid blocking async runtime
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    let url_clone = url.clone();
+    let window_clone = window.clone();
+
+    std::thread::spawn(move || {
+        let result = crate::http_log_fetcher::fetch_logs_from_http(
+            db_path,
+            url_clone,
+            |msg| {
+                let _ = window_clone.emit("http-progress", msg);
+            },
+        );
+        let _ = tx.send(result);
+    });
+
+    rx.await
+        .map_err(|e| format!("Join error: {}", e))?
+        .map_err(|e| e.to_string())
 }
 
 // Get paginated log entries
@@ -265,6 +298,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             parse_log_directory,
+            parse_log_http_url,
             get_log_entries,
             add_bookmark,
             get_bookmarks,
