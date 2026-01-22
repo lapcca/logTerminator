@@ -177,6 +177,143 @@ impl HtmlLogParser {
         Ok(entries)
     }
 
+    /// Parse HTML log content from a string (for HTTP-fetched logs)
+    pub fn parse_html_string(
+        html_content: &str,
+        file_url: &str,
+        test_session_id: &str,
+        file_index: usize,
+    ) -> Result<Vec<LogEntry>, Box<dyn std::error::Error>> {
+        println!("Parsing HTML from URL: {}", file_url);
+
+        let document = Html::parse_document(html_content);
+
+        // Select table rows
+        let row_selector = Selector::parse("table tr").ok();
+        let row_selector = match row_selector {
+            Some(s) => s,
+            None => {
+                println!("Warning: Could not parse row selector");
+                return Ok(Vec::new());
+            }
+        };
+
+        // Direct selectors for specific cell types
+        let date_selector = Selector::parse("td.date").ok();
+        let level_selector = Selector::parse("td.level").ok();
+        let message_selector = Selector::parse("td.message").ok();
+        let stack_selector = Selector::parse("td.stack[hidden]").ok();
+        let th_selector = Selector::parse("th").ok();
+        let td_any_selector = Selector::parse("td").ok();
+
+        let th_selector = match th_selector {
+            Some(s) => s,
+            None => return Ok(Vec::new()),
+        };
+
+        let td_any_selector = match td_any_selector {
+            Some(s) => s,
+            None => return Ok(Vec::new()),
+        };
+
+        let mut entries = Vec::new();
+        let mut line_number = 0;
+
+        for row in document.select(&row_selector) {
+            if row.select(&th_selector).next().is_some() {
+                line_number += 1;
+                continue;
+            }
+
+            let timestamp_text = if let Some(sel) = &date_selector {
+                row.select(sel)
+                    .next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .unwrap_or_default()
+            } else {
+                row.select(&td_any_selector)
+                    .next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .unwrap_or_default()
+            };
+
+            if timestamp_text.is_empty() || timestamp_text == "Timestamp" {
+                line_number += 1;
+                continue;
+            }
+
+            // Extract level from td.level and remove surrounding brackets
+            let level_text = if let Some(sel) = &level_selector {
+                row.select(sel)
+                    .next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .map(|s| s.trim_matches(&['[', ']'] as &[char]).to_string())
+                    .unwrap_or_default()
+            } else {
+                let cells: Vec<_> = row.select(&td_any_selector).collect();
+                if cells.len() > 1 {
+                    cells[1]
+                        .text()
+                        .collect::<String>()
+                        .trim()
+                        .to_string()
+                        .trim_matches(&['[', ']'] as &[char])
+                        .to_string()
+                } else {
+                    String::new()
+                }
+            };
+
+            // Extract message from td.message
+            let message_text = if let Some(sel) = &message_selector {
+                row.select(sel)
+                    .next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .unwrap_or_default()
+            } else {
+                let cells: Vec<_> = row.select(&td_any_selector).collect();
+                if !cells.is_empty() {
+                    cells[cells.len() - 1]
+                        .text()
+                        .collect::<String>()
+                        .trim()
+                        .to_string()
+                } else {
+                    String::new()
+                }
+            };
+
+            // Try to find hidden stack trace
+            let stack_text = if let Some(sel) = &stack_selector {
+                row.select(sel)
+                    .next()
+                    .map(|el| el.text().collect::<String>().trim().to_string())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            let entry = LogEntry {
+                id: None,
+                test_session_id: test_session_id.to_string(),
+                file_path: file_url.to_string(),
+                file_index,
+                timestamp: timestamp_text,
+                level: level_text,
+                stack: stack_text,
+                message: message_text,
+                line_number,
+                created_at: Some(Utc::now()),
+            };
+            entries.push(entry);
+
+            line_number += 1;
+        }
+
+        println!("Parsed {} log entries from {}", entries.len(), file_url);
+        Ok(entries)
+    }
+
     pub fn scan_html_files(
         directory_path: &str,
     ) -> Result<std::collections::HashMap<String, Vec<String>>, Box<dyn std::error::Error>> {
