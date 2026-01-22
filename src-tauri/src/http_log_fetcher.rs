@@ -43,3 +43,43 @@ pub struct HttpLogFetcher {
     client: Client,
     base_url: Url,
 }
+
+impl HttpLogFetcher {
+    /// Parse directory listing HTML and extract all file URLs
+    pub fn parse_directory_listing(html: &str, base_url: &str) -> Result<Vec<String>, HttpFetchError> {
+        let document = Html::parse_document(html);
+        let link_selector = Selector::parse("a[href]").unwrap();
+
+        let base = Url::parse(base_url)
+            .map_err(|e| HttpFetchError::InvalidUrl(format!("{}: {}", base_url, e)))?;
+
+        let mut urls = Vec::new();
+
+        for element in document.select(&link_selector) {
+            if let Some(href) = element.value().attr("href") {
+                // Skip parent directory links
+                if href == "../" || href.starts_with("?") {
+                    continue;
+                }
+
+                // Skip directory links (ending with /)
+                if href.ends_with('/') {
+                    continue;
+                }
+
+                // Resolve relative URLs against base
+                match base.join(href) {
+                    Ok(full_url) => {
+                        urls.push(full_url.to_string());
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Could not resolve URL '{}': {}", href, e);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        Ok(urls)
+    }
+}
