@@ -45,6 +45,27 @@ pub struct HttpLogFetcher {
 }
 
 impl HttpLogFetcher {
+    /// Create a new HTTP log fetcher
+    pub fn new(base_url: &str) -> Result<Self, HttpFetchError> {
+        let url = Url::parse(base_url)
+            .map_err(|e| HttpFetchError::InvalidUrl(format!("{}: {}", base_url, e)))?;
+
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|e| HttpFetchError::NetworkError(e))?;
+
+        Ok(HttpLogFetcher {
+            client,
+            base_url: url,
+        })
+    }
+
+    /// Get the base URL
+    pub fn base_url(&self) -> &Url {
+        &self.base_url
+    }
+
     /// Parse directory listing HTML and extract all file URLs
     pub fn parse_directory_listing(html: &str, base_url: &str) -> Result<Vec<String>, HttpFetchError> {
         let document = Html::parse_document(html);
@@ -81,5 +102,25 @@ impl HttpLogFetcher {
         }
 
         Ok(urls)
+    }
+
+    /// Fetch a single log file's HTML content
+    pub fn fetch_log_file(&self, file_url: &str) -> Result<String, HttpFetchError> {
+        let response = self
+            .client
+            .get(file_url)
+            .send()
+            .map_err(|e| HttpFetchError::NetworkError(e))?;
+
+        if !response.status().is_success() {
+            return Err(HttpFetchError::DownloadFailed {
+                url: file_url.to_string(),
+                reason: format!("HTTP status: {}", response.status()),
+            });
+        }
+
+        response
+            .text()
+            .map_err(|e| HttpFetchError::NetworkError(e))
     }
 }

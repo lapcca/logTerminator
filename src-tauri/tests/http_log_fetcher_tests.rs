@@ -26,3 +26,9 @@ fn test_parse_apache_directory_listing() {
     assert!(urls.contains(&"http://example.com/logs/TestEnableTcpdump_ID_1---0.html".to_string()));
     assert!(urls.contains(&"http://example.com/logs/TestEnableTcpdump_ID_1---1.html".to_string()));
 }
+
+#[test]
+fn test_fetcher_new() {
+    let fetcher = HttpLogFetcher::new("http://example.com/logs/").unwrap();
+    assert_eq!(fetcher.base_url().as_str(), "http://example.com/logs/");
+}
