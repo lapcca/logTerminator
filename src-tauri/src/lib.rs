@@ -1,4 +1,5 @@
 mod database;
+mod http_log_fetcher;
 pub mod log_parser;
 
 use crate::database::DatabaseManager;
