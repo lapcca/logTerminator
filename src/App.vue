@@ -3,6 +3,33 @@ import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  ArrowRight,
+  ArrowLeft,
+  Document,
+  FolderOpened,
+  Link,
+  Folder,
+  Edit,
+  Delete,
+  Star,
+  StarFilled,
+  Search,
+  Refresh,
+  Collection,
+  Expand,
+  Fold,
+  Setting,
+  Check,
+  Close,
+  Plus,
+  Minus,
+  DArrowLeft,
+  DArrowRight,
+  MoreFilled,
+  InfoFilled
+} from '@element-plus/icons-vue'
 
 // Reactive data
 const currentSession = ref('')
@@ -275,6 +302,25 @@ async function loadSessions() {
   }
 }
 
+// Confirm delete session
+async function confirmDeleteSession(session) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除测试会话 "${session.name}" 及其所有日志吗？此操作不可撤销。`,
+      '确认删除',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger'
+      }
+    )
+    await deleteSession(session.id)
+  } catch {
+    // User cancelled
+  }
+}
+
 // Delete test session
 async function deleteSession(sessionId, event) {
   // Stop event propagation to prevent parent click handlers
@@ -282,18 +328,9 @@ async function deleteSession(sessionId, event) {
     event.stopPropagation()
   }
 
-  const confirmed = confirm('确定要删除此测试会话及其所有日志吗？此操作不可撤销。')
-  console.log('Delete confirmation result:', confirmed, 'for session:', sessionId)
-
-  if (!confirmed) {
-    console.log('Session deletion cancelled by user')
-    return
-  }
-
   try {
-    console.log('Proceeding to delete session:', sessionId)
     await invoke('delete_session', { sessionId })
-    console.log('Session deleted successfully:', sessionId)
+    ElMessage.success('会话已删除')
 
     // If deleting current session, clear it
     if (currentSession.value === sessionId) {
@@ -305,7 +342,7 @@ async function deleteSession(sessionId, event) {
     await loadSessions()
   } catch (error) {
     console.error('Error deleting session:', error)
-    alert(`删除会话时出错：${error}`)
+    ElMessage.error(`删除会话时出错：${error}`)
   }
 }
 
@@ -653,93 +690,120 @@ watch(dynamicLogLevels, (newLevels) => {
 watch(sidebarWidth, (newWidth) => {
   localStorage.setItem('sidebarWidth', newWidth)
 })
+
+// Element Plus Table helpers
+function getLevelType(level) {
+  const types = {
+    'ERROR': 'danger',
+    'WARNING': 'warning',
+    'INFO': 'primary',
+    'DEBUG': 'info',
+    'TRACE': ''
+  }
+  return types[level] || ''
+}
+
+// Computed table height
+const tableHeight = computed(() => {
+  return showSidebar.value ? 'calc(100vh - 280px)' : 'calc(100vh - 160px)'
+})
+
+// Handle page change
+function handlePageChange(page) {
+  options.page = page
+  refreshLogs()
+}
+
+// Handle page size change
+function handleSizeChange(size) {
+  options.itemsPerPage = size
+  options.page = 1
+  refreshLogs()
+}
+
+// Get table row class name
+function getTableRowClassName({ row }) {
+  const classes = []
+  if (selectedEntryIds.value.includes(row.id)) {
+    classes.push('table-row-selected')
+  }
+  if (isHighlighted(row.id)) {
+    classes.push('table-row-highlighted')
+  }
+  return classes.join(' ')
+}
 </script>
 
 <template>
-  <v-app>
+  <div class="app-container">
     <!-- Log Source Dialog -->
-    <v-dialog v-model="showSourceDialog" max-width="500">
-      <v-card>
-        <v-card-title class="d-flex align-center">
-          <v-icon class="mr-2">mdi-folder-open</v-icon>
-          Open Log Source
-        </v-card-title>
-        <v-card-text class="pt-4">
-          <v-radio-group v-model="sourceType">
-            <v-radio label="Local Folder" value="folder"></v-radio>
-            <v-btn
-              v-if="sourceType === 'folder'"
-              @click="selectLocalFolder"
-              variant="outlined"
-              prepend-icon="mdi-folder"
-              class="ml-8 mb-4">
-              {{ selectedFolderPath || 'Browse...' }}
-            </v-btn>
+    <el-dialog
+      v-model="showSourceDialog"
+      title="打开日志源"
+      width="500px"
+      :close-on-click-modal="false">
+      <el-radio-group v-model="sourceType" class="source-type-group">
+        <el-radio value="folder" size="large">本地文件夹</el-radio>
+        <div v-if="sourceType === 'folder'" class="folder-selector">
+          <el-button
+            @click="selectLocalFolder"
+            :icon="Folder"
+            class="folder-btn">
+            {{ selectedFolderPath || '浏览...' }}
+          </el-button>
+        </div>
 
-            <v-radio label="HTTP Server" value="url" class="mt-4"></v-radio>
-            <v-text-field
-              v-if="sourceType === 'url'"
-              v-model="httpUrl"
-              label="Enter URL"
-              variant="outlined"
-              placeholder="http://logs.example.com/"
-              prepend-inner-icon="mdi-web"
-              class="ml-8"
-              clearable>
-            </v-text-field>
-          </v-radio-group>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn variant="text" @click="showSourceDialog = false">Cancel</v-btn>
-          <v-btn
-            color="primary"
-            variant="flat"
-            :disabled="!canOpen"
-            @click="openLogSource">
-            Open
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+        <el-radio value="url" size="large" class="mt-4">HTTP 服务器</el-radio>
+        <el-input
+          v-if="sourceType === 'url'"
+          v-model="httpUrl"
+          placeholder="http://logs.example.com/"
+          :prefix-icon="Link"
+          clearable
+          class="url-input">
+        </el-input>
+      </el-radio-group>
+
+      <template #footer>
+        <el-button @click="showSourceDialog = false">取消</el-button>
+        <el-button
+          type="primary"
+          :disabled="!canOpen"
+          @click="openLogSource">
+          打开
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- Edit Bookmark Dialog -->
-    <v-dialog v-model="showEditBookmarkDialog" max-width="400">
-      <v-card>
-        <v-card-title class="d-flex align-center">
-          <v-icon class="mr-2">mdi-bookmark-edit</v-icon>
-          编辑书签名称
-        </v-card-title>
-        <v-card-text>
-          <v-text-field
-            v-model="editingBookmarkTitle"
-            label="书签名称"
-            variant="outlined"
-            autofocus
-            prepend-inner-icon="mdi-form-textbox"
-            hide-details
-            class="mb-4"
-            @keyup.enter="confirmEditBookmark">
-          </v-text-field>
-          <div v-if="editingBookmark" class="text-caption text-grey">
-            <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
-            日志时间: {{ editingBookmark[1]?.timestamp }}
-          </div>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn variant="text" @click="showEditBookmarkDialog = false">取消</v-btn>
-          <v-btn color="primary" variant="flat" @click="confirmEditBookmark">确定</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <el-dialog
+      v-model="showEditBookmarkDialog"
+      title="编辑书签名称"
+      width="400px"
+      :close-on-click-modal="false">
+      <el-input
+        v-model="editingBookmarkTitle"
+        placeholder="书签名称"
+        autofocus
+        @keyup.enter="confirmEditBookmark">
+      </el-input>
+      <div v-if="editingBookmark" class="bookmark-info">
+        <el-icon :size="14"><InfoFilled /></el-icon>
+        日志时间: {{ editingBookmark[1]?.timestamp }}
+      </div>
+
+      <template #footer>
+        <el-button @click="showEditBookmarkDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmEditBookmark">确定</el-button>
+      </template>
+    </el-dialog>
 
     <!-- App Header -->
     <el-header class="app-header">
       <div class="header-content">
         <div class="header-left">
           <el-button
-            :icon="showSidebar ? ArrowRight : ArrowLeft"
+            :icon="showSidebar ? Fold : Expand"
             circle
             @click="showSidebar = !showSidebar"
             :title="showSidebar ? '收起左侧面板' : '展开左侧面板'"
@@ -751,24 +815,31 @@ watch(sidebarWidth, (newWidth) => {
           <el-select
             v-model="currentSession"
             placeholder="选择会话"
-            style="width: 300px; margin-left: 20px"
+            class="session-select"
             @change="onSessionChange">
             <el-option
               v-for="session in sessions"
               :key="session.id"
               :label="session.name"
               :value="session.id">
-              <div class="session-option">
-                <el-icon><component :is="session.source_type === 'http' ? 'Link' : 'Folder'" /></el-icon>
-                <span>{{ session.name }}</span>
-                <span class="session-count">{{ session.total_entries }} 条记录</span>
+              <div class="session-option-item">
+                <div class="session-info">
+                  <el-icon><component :is="session.source_type === 'http' ? 'Link' : 'Folder'" /></el-icon>
+                  <span class="session-name">{{ session.name }}</span>
+                  <span class="session-count">{{ session.total_entries }} 条记录</span>
+                </div>
+                <el-icon
+                  class="delete-icon"
+                  :size="16"
+                  @click.stop="confirmDeleteSession(session)">
+                  <Delete />
+                </el-icon>
               </div>
             </el-option>
           </el-select>
         </div>
 
         <div class="header-right">
-          <!-- Loading indicator -->
           <span v-if="loadingMessage" class="loading-message">{{ loadingMessage }}</span>
           <el-button
             type="primary"
@@ -780,7 +851,6 @@ watch(sidebarWidth, (newWidth) => {
         </div>
       </div>
 
-      <!-- Loading Progress -->
       <el-progress
         v-if="loading"
         :percentage="100"
@@ -789,84 +859,77 @@ watch(sidebarWidth, (newWidth) => {
         class="loading-progress" />
     </el-header>
 
-    <v-main class="bg-grey-lighten-4">
-      <v-container fluid class="pa-4">
-        <v-row>
+    <!-- Main Content -->
+    <el-main class="main-content">
+      <div class="content-wrapper">
+        <div class="content-row">
           <!-- Left Sidebar -->
-          <v-expand-x-transition>
-            <div v-if="showSidebar" style="display: flex; flex-shrink: 0;">
-              <v-col :style="{ width: sidebarWidth + 'px', flexShrink: 0 }" class="pr-4">
+          <transition name="slide-fade">
+            <div v-if="showSidebar" class="sidebar-container">
+              <div class="sidebar" :style="{ width: sidebarWidth + 'px' }">
                 <!-- Bookmarks Panel -->
-              <v-card class="mb-3" elevation="2">
-                <v-card-title class="d-flex align-center py-2 px-4 bg-amber-lighten-5">
-                  <v-btn
-                    icon
-                    variant="text"
-                    size="small"
-                    @click="showBookmarksPanel = !showBookmarksPanel"
-                    :title="showBookmarksPanel ? '收起书签面板' : '展开书签面板'"
-                    class="mr-1">
-                    <v-icon :class="{ 'rotate-180': !showBookmarksPanel }" size="20">
-                      mdi-chevron-down
-                    </v-icon>
-                  </v-btn>
-                  <v-icon color="amber-darken-2" class="mr-2">mdi-bookmark-multiple</v-icon>
-                  <span class="font-weight-medium">书签</span>
-                  <v-chip size="small" color="amber" variant="flat" class="ml-2">
-                    {{ bookmarks.length }}
-                  </v-chip>
-                </v-card-title>
-                <v-expand-transition>
-                  <div v-show="showBookmarksPanel">
-                    <v-divider></v-divider>
-                    <v-card-text class="pa-0" style="max-height: 300px; overflow-y: auto;">
-                      <v-list v-if="bookmarks.length > 0" density="comfortable">
-                        <v-list-item
-                          v-for="bookmark in bookmarks"
-                          :key="bookmark[0]?.id"
-                          @click="jumpToBookmark(bookmark)"
-                          class="bookmark-item px-3"
-                          rounded="sm">
-                          <template v-slot:prepend>
-                            <v-avatar color="amber-lighten-3" size="32" class="mr-3">
-                              <v-icon color="amber-darken-2" size="small">mdi-bookmark</v-icon>
-                            </v-avatar>
-                          </template>
-                          <v-list-item-title class="text-body-2 font-weight-medium">
-                            {{ bookmark[0]?.title || '书签' }}
-                          </v-list-item-title>
-                          <template v-slot:append>
-                            <v-btn
-                              icon
-                              variant="text"
-                              size="small"
-                              color="grey"
-                              @click.stop="showEditBookmarkTitleDialog(bookmark)"
-                              title="编辑书签名称">
-                              <v-icon size="small">mdi-pencil</v-icon>
-                            </v-btn>
-                            <v-btn
-                              icon
-                              variant="text"
-                              size="small"
-                              color="grey"
-                              @click.stop="removeBookmarkById(bookmark[0]?.id)"
-                              title="删除书签">
-                              <v-icon size="small">mdi-close</v-icon>
-                            </v-btn>
-                          </template>
-                        </v-list-item>
-                      </v-list>
-                      <div v-else class="pa-6 text-center text-grey">
-                        <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-bookmark-outline</v-icon>
-                        <div class="text-body-2">暂无书签</div>
-                        <div class="text-caption">点击日志条目旁的星号添加书签</div>
+                <el-card class="bookmarks-panel" shadow="hover">
+                  <template #header>
+                    <div class="panel-header">
+                      <div class="panel-title">
+                        <el-icon
+                          :class="{ 'rotated': !showBookmarksPanel }"
+                          @click="showBookmarksPanel = !showBookmarksPanel">
+                          <ArrowRight />
+                        </el-icon>
+                        <el-icon class="bookmark-icon"><Collection /></el-icon>
+                        <span>书签</span>
+                        <el-tag size="small" type="warning" class="bookmark-count">
+                          {{ bookmarks.length }}
+                        </el-tag>
                       </div>
-                    </v-card-text>
-                  </div>
-                </v-expand-transition>
-              </v-card>
-              </v-col>
+                    </div>
+                  </template>
+
+                  <transition name="panel-slide">
+                    <div v-show="showBookmarksPanel" class="bookmarks-list">
+                      <el-scrollbar :height="'calc(100vh - 280px)'">
+                        <div v-if="bookmarks.length > 0" class="bookmark-items">
+                          <div
+                            v-for="bookmark in bookmarks"
+                            :key="bookmark[0]?.id"
+                            class="bookmark-item"
+                            @click="jumpToBookmark(bookmark)">
+                            <el-avatar :size="32" class="bookmark-avatar">
+                              <el-icon><StarFilled /></el-icon>
+                            </el-avatar>
+                            <span class="bookmark-title">{{ bookmark[0]?.title || '书签' }}</span>
+                            <div class="bookmark-actions">
+                              <el-button
+                                link
+                                type="primary"
+                                :icon="Edit"
+                                size="small"
+                                @click.stop="showEditBookmarkTitleDialog(bookmark)"
+                                title="编辑书签名称" />
+                              <el-button
+                                link
+                                type="danger"
+                                :icon="Close"
+                                size="small"
+                                @click.stop="removeBookmarkById(bookmark[0]?.id)"
+                                title="删除书签" />
+                            </div>
+                          </div>
+                        </div>
+                        <el-empty
+                          v-else
+                          description="暂无书签"
+                          :image-size="80">
+                          <template #description>
+                            <p class="empty-text">点击日志条目旁的星号添加书签</p>
+                          </template>
+                        </el-empty>
+                      </el-scrollbar>
+                    </div>
+                  </transition>
+                </el-card>
+              </div>
 
               <!-- Resizer -->
               <div
@@ -875,327 +938,161 @@ watch(sidebarWidth, (newWidth) => {
                 @mousedown="startResize">
               </div>
             </div>
-          </v-expand-x-transition>
+          </transition>
 
-          <!-- Main Content -->
-          <v-col :style="{ flex: 1 }">
-            <!-- Filters Card -->
-            <v-card class="mb-3" elevation="2">
-              <v-card-text class="pa-4">
-                <v-row align="center">
-                  <v-col cols="12" md="2">
-                    <v-select
-                      v-model="options.itemsPerPage"
-                      :items="itemsPerPageOptions"
-                      label="每页显示"
-                      variant="outlined"
-                      density="comfortable"
-                      prepend-inner-icon="mdi-format-list-numbered"
-                      bg-color="white"
-                      @update:model-value="options.page = 1; refreshLogs()">
-                    </v-select>
-                  </v-col>
-                  <v-col cols="12" md="2">
-                    <v-select
-                      v-model="levelFilter"
-                      :items="dynamicLogLevels"
-                      label="日志级别"
-                      variant="outlined"
-                      density="comfortable"
-                      prepend-inner-icon="mdi-filter"
-                      bg-color="white"
-                      @update:model-value="refreshLogs">
-                    </v-select>
-                  </v-col>
-                  <v-col cols="12" md="4">
-                    <v-text-field
-                      v-model="searchTerm"
-                      label="搜索日志内容..."
-                      variant="outlined"
-                      density="comfortable"
-                      prepend-inner-icon="mdi-magnify"
-                      clearable
-                      bg-color="white"
-                      @update:model-value="debouncedSearch">
-                    </v-text-field>
-                  </v-col>
-                  <v-col cols="12" md="4" class="d-flex justify-end">
-                    <v-btn
-                      color="primary"
-                      variant="elevated"
-                      prepend-icon="mdi-refresh"
-                      :loading="loading"
-                      @click="refreshLogs">
-                      刷新
-                    </v-btn>
-                  </v-col>
-                </v-row>
-              </v-card-text>
-            </v-card>
+          <!-- Main Content Area -->
+          <div class="main-area">
+            <!-- Filters -->
+            <el-card class="filters-card" shadow="hover">
+              <el-row :gutter="16" align="middle">
+                <el-col :span="4">
+                  <el-select
+                    v-model="options.itemsPerPage"
+                    placeholder="每页显示"
+                    @change="handleSizeChange">
+                    <el-option
+                      v-for="opt in itemsPerPageOptions"
+                      :key="opt.value"
+                      :label="opt.title"
+                      :value="opt.value" />
+                  </el-select>
+                </el-col>
+                <el-col :span="4">
+                  <el-select
+                    v-model="levelFilter"
+                    placeholder="日志级别"
+                    @change="refreshLogs">
+                    <el-option
+                      v-for="level in dynamicLogLevels"
+                      :key="level"
+                      :label="level"
+                      :value="level" />
+                  </el-select>
+                </el-col>
+                <el-col :span="8">
+                  <el-input
+                    v-model="searchTerm"
+                    placeholder="搜索日志内容..."
+                    :prefix-icon="Search"
+                    clearable
+                    @input="debouncedSearch">
+                  </el-input>
+                </el-col>
+                <el-col :span="8" class="filter-actions">
+                  <el-button
+                    type="primary"
+                    :icon="Refresh"
+                    :loading="loading"
+                    @click="refreshLogs">
+                    刷新
+                  </el-button>
+                </el-col>
+              </el-row>
+            </el-card>
 
+            <!-- Log Table -->
+            <el-card class="table-card" shadow="hover">
+              <el-table
+                :data="logEntries"
+                :height="tableHeight"
+                v-loading="loading"
+                stripe
+                highlight-current-row
+                @row-click="toggleRowSelection"
+                :row-class-name="getTableRowClassName">
+                <el-table-column type="selection" width="50" />
+                <el-table-column prop="timestamp" label="时间戳" width="180" />
+                <el-table-column prop="level" label="级别" width="90">
+                  <template #default="{ row }">
+                    <el-tag :type="getLevelType(row.level)" size="small">
+                      {{ row.level }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="stack" label="调用栈" width="250">
+                  <template #default="{ row }">
+                    <el-tooltip
+                      v-if="row.stack"
+                      placement="top"
+                      :show-after="200"
+                      :hide-after="300"
+                      effect="light"
+                      popper-class="stack-tooltip">
+                      <template #content>
+                        <div class="tooltip-content">
+                          <div class="tooltip-header">
+                            <el-icon><MoreFilled /></el-icon>
+                            Stack Trace
+                          </div>
+                          <div class="tooltip-text">{{ row.stack }}</div>
+                        </div>
+                      </template>
+                      <span class="stack-cell">{{ formatStack(row.stack) }}</span>
+                    </el-tooltip>
+                    <span v-else class="stack-cell">-</span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="message" label="消息" min-width="300">
+                  <template #default="{ row }">
+                    <el-tooltip
+                      placement="bottom"
+                      :show-after="200"
+                      effect="light"
+                      popper-class="message-tooltip">
+                      <template #content>
+                        <div class="tooltip-content">
+                          <div class="tooltip-header">
+                            <el-icon><InfoFilled /></el-icon>
+                            Message
+                          </div>
+                          <div class="tooltip-text">{{ row.message }}</div>
+                        </div>
+                      </template>
+                      <div class="message-cell">{{ row.message }}</div>
+                    </el-tooltip>
+                  </template>
+                </el-table-column>
+                <el-table-column label="书签" width="80" align="center">
+                  <template #default="{ row }">
+                    <el-button
+                      :icon="isBookmarked(row.id) ? StarFilled : Star"
+                      :type="isBookmarked(row.id) ? 'warning' : 'default'"
+                      circle
+                      size="small"
+                      @click.stop="toggleBookmark(row)" />
+                  </template>
+                </el-table-column>
+              </el-table>
 
-             <v-data-table-server
-               v-model="selectedEntryIds"
-               :headers="headers"
-               :items="logEntries"
-               :loading="loading"
-               :items-length="totalEntries"
-               :options.sync="options"
-               @update:options="handlePagination"
-               show-select
-               show-pagination
-               item-value="id"
-               class="log-table"
-               density="comfortable"
-               fixed-header
-               hover
-               :height="showSidebar ? 'calc(100vh - 280px)' : 'calc(100vh - 160px)'">
-
-               <!-- Pagination info slot -->
-               <template v-slot:bottom="{ page, pageCount, prevPage, nextPage }">
-                 <div class="d-flex align-center pa-3" style="width: 100%;">
-                   <v-btn
-                     icon
-                     variant="text"
-                     size="small"
-                     :disabled="options.page === 1"
-                     @click="goToPage(options.page - 1)"
-                     class="mr-2">
-                     <v-icon>mdi-chevron-left</v-icon>
-                   </v-btn>
-
-                   <!-- Page number buttons -->
-                   <div class="d-flex align-center mx-1">
-                     <v-btn
-                       variant="text"
-                       size="small"
-                       :class="{ 'bg-primary-lighten-5': options.page === 1 }"
-                       min-width="32"
-                       @click="goToPage(1)"
-                       :disabled="options.page === 1">
-                       1
-                     </v-btn>
-
-                     <v-btn
-                       v-if="options.page > 3"
-                       variant="text"
-                       size="small"
-                       disabled
-                       min-width="32"
-                       class="px-1">
-                       ...
-                     </v-btn>
-
-                     <v-btn
-                       v-for="p in visiblePageNumbers(options.page, totalPages)"
-                       :key="p"
-                       variant="text"
-                       size="small"
-                       :class="{ 'bg-primary-lighten-5': options.page === p }"
-                       min-width="32"
-                       @click="goToPage(p)">
-                       {{ p }}
-                     </v-btn>
-
-                     <v-btn
-                       v-if="options.page < totalPages - 2"
-                       variant="text"
-                       size="small"
-                       disabled
-                       min-width="32"
-                       class="px-1">
-                       ...
-                     </v-btn>
-
-                     <v-btn
-                       v-if="totalPages > 1"
-                       variant="text"
-                       size="small"
-                       :class="{ 'bg-primary-lighten-5': options.page === totalPages }"
-                       min-width="32"
-                       @click="goToPage(totalPages)"
-                       :disabled="options.page === totalPages">
-                       {{ totalPages }}
-                     </v-btn>
-                   </div>
-
-                   <v-btn
-                     icon
-                     variant="text"
-                     size="small"
-                     :disabled="options.page === totalPages"
-                     @click="goToPage(options.page + 1)"
-                     class="mr-4 ml-2">
-                     <v-icon>mdi-chevron-right</v-icon>
-                   </v-btn>
-
-                   <v-divider vertical class="mx-2"></v-divider>
-
-                   <!-- Page jump input -->
-                   <div class="d-flex align-center mx-3">
-                     <span class="text-body-2 mr-2">跳转到</span>
-                     <v-text-field
-                       v-model.number="jumpToPage"
-                       @keyup.enter="executeJump()"
-                       variant="outlined"
-                       density="compact"
-                       hide-details
-                       single-line
-                       style="width: 60px;"
-                       type="number"
-                       :min="1"
-                       :max="totalPages">
-                     </v-text-field>
-                     <span class="text-body-2 ml-2">页</span>
-                   </div>
-
-                   <v-divider vertical class="mx-2"></v-divider>
-                   <span class="text-body-2 text-grey ml-2">
-                     共 {{ totalEntries }} 条记录
-                   </span>
-                 </div>
-               </template>
-
-               <!-- Select All Checkbox -->
-               <template v-slot:header.data-table-select="{ on, modelValue, someSelected, allSelected }">
-                 <v-checkbox
-                   :model-value="allSelected"
-                   :indeterminate="someSelected && !allSelected"
-                   color="primary"
-                   hide-details
-                   @update:model-value="(val) => {
-                     if (val) toggleSelectAll()
-                     else if (someSelected) toggleSelectAll()
-                   }">
-                 </v-checkbox>
-               </template>
-
-               <!-- Row with click selection -->
-               <template v-slot:item="{ item, isSelected, toggleSelect }">
-                 <tr
-                   :data-entry-id="item.id"
-                   :class="{
-                     'table-row-selected': isSelected,
-                     'table-row-highlighted': isHighlighted(item.id),
-                     'cursor-pointer': true
-                   }"
-                   @click="toggleRowSelection(item)">
-                   <!-- Checkbox cell -->
-                   <td class="text-center" @click.stop>
-                     <v-checkbox
-                       :model-value="isSelected"
-                       color="primary"
-                       hide-details
-                       @update:model-value="toggleSelect">
-                     </v-checkbox>
-                   </td>
-                   <!-- Timestamp -->
-                   <td>
-                     <span class="font-mono text-body-2">{{ item.timestamp }}</span>
-                   </td>
-                   <!-- Level -->
-                   <td>
-                     <v-chip
-                       :color="getLevelColor(item.level)"
-                       size="small"
-                       variant="flat"
-                       class="font-weight-medium">
-                       {{ item.level }}
-                     </v-chip>
-                   </td>
-                   <!-- Stack -->
-                   <td>
-                     <v-tooltip
-                       location="top"
-                       open-on-hover
-                       close-on-content-click="false"
-                       :open-delay="200"
-                       :close-delay="300"
-                       transition="fade-transition"
-                       :disabled="!item.stack"
-                       interactive>
-                       <template v-slot:activator="{ props }">
-                         <span
-                           v-bind="props"
-                           class="text-truncate d-block font-mono text-caption stack-cell"
-                           :class="{ 'has-stack': item.stack }"
-                           style="max-width: 240px; color: #666; display: block; min-height: 20px;">
-                           {{ formatStack(item.stack) }}
-                         </span>
-                       </template>
-                       <v-card v-if="item.stack" class="stack-tooltip-card" max-width="600" max-height="400" style="background: white;">
-                         <v-card-title class="tooltip-header py-2 px-4" style="font-size: 13px; font-weight: 500; border-bottom: 1px solid rgba(0,0,0,0.08);">
-                           <v-icon size="14" class="mr-2" style="color: #ffa726;">mdi-layers-stack</v-icon>
-                           Stack Trace
-                         </v-card-title>
-                         <v-card-text class="font-mono text-caption tooltip-content pa-4" style="color: #424242; white-space: pre-wrap; overflow-y: auto; max-height: 340px;">
-                           {{ item.stack }}
-                         </v-card-text>
-                       </v-card>
-                     </v-tooltip>
-                   </td>
-                   <!-- Message -->
-                   <td>
-                     <v-tooltip
-                       location="bottom"
-                       max-width="800"
-                       :open-delay="200"
-                       :close-delay="300"
-                       transition="fade-transition"
-                       interactive>
-                       <template v-slot:activator="{ props }">
-                         <div
-                           v-bind="props"
-                           class="text-body-2 text-wrap message-cell"
-                           style="word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">
-                           {{ item.message }}
-                         </div>
-                       </template>
-                       <v-card class="message-tooltip-card" max-width="800" max-height="500" style="background: white;">
-                         <v-card-title class="tooltip-header py-2 px-4" style="font-size: 13px; font-weight: 500; border-bottom: 1px solid rgba(0,0,0,0.08);">
-                           <v-icon size="14" class="mr-2" style="color: #42a5f5;">mdi-message-text</v-icon>
-                           Message
-                         </v-card-title>
-                         <v-card-text class="text-body-2 tooltip-content pa-4" style="color: #424242; white-space: pre-wrap; overflow-y: auto; max-height: 440px;">
-                           {{ item.message }}
-                         </v-card-text>
-                       </v-card>
-                     </v-tooltip>
-                   </td>
-                   <!-- Bookmark action -->
-                   <td class="text-center" @click.stop>
-                     <v-btn
-                       :icon="isBookmarked(item.id) ? 'mdi-star' : 'mdi-star-outline'"
-                       :color="isBookmarked(item.id) ? 'amber' : 'grey'"
-                       :variant="isBookmarked(item.id) ? 'flat' : 'text'"
-                       size="small"
-                       @click="toggleBookmark(item)"
-                       :title="isBookmarked(item.id) ? '取消书签' : '添加书签'">
-                     </v-btn>
-                   </td>
-                 </tr>
-               </template>
-
-               <!-- Empty state -->
-               <template v-slot:no-data>
-                 <div class="text-center pa-8">
-                   <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-text-search</v-icon>
-                   <div class="text-h6 text-grey">暂无日志数据</div>
-                   <div class="text-body-2 text-grey-darken-1 mt-2">
-                     点击右上角"打开目录"加载日志文件
-                   </div>
-                 </div>
-               </template>
-
-             </v-data-table-server>
-          </v-col>
-        </v-row>
-      </v-container>
-    </v-main>
-  </v-app>
+              <!-- Pagination -->
+              <div class="pagination-container">
+                <el-pagination
+                  v-model:current-page="options.page"
+                  v-model:page-size="options.itemsPerPage"
+                  :page-sizes="[25, 50, 100, 200, 500]"
+                  :total="totalEntries"
+                  layout="prev, pager, next, jumper, ->, sizes, total"
+                  background
+                  @current-change="handlePageChange"
+                  @size-change="handleSizeChange" />
+              </div>
+            </el-card>
+          </div>
+        </div>
+      </div>
+    </el-main>
+  </div>
 </template>
 
 <style scoped>
+/* App Container */
+.app-container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f5f7fa;
+}
+
 /* App Header Styles */
 .app-header {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1206,6 +1103,7 @@ watch(sidebarWidth, (newWidth) => {
   align-items: center;
   position: relative;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
 }
 
 .header-content {
@@ -1246,22 +1144,15 @@ watch(sidebarWidth, (newWidth) => {
   letter-spacing: 0.5px;
 }
 
+.session-select {
+  width: 300px;
+  margin-left: 20px;
+}
+
 .header-right {
   display: flex;
   align-items: center;
   gap: 16px;
-}
-
-.session-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.session-count {
-  color: #909399;
-  font-size: 12px;
-  margin-left: auto;
 }
 
 .loading-message {
@@ -1278,31 +1169,180 @@ watch(sidebarWidth, (newWidth) => {
   height: 3px;
 }
 
-/* Font for timestamps */
-.font-mono {
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+/* Main Content */
+.main-content {
+  flex: 1;
+  padding: 16px;
+  overflow: hidden;
 }
 
-/* Table row styles */
-.cursor-pointer {
+.content-wrapper {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.content-row {
+  display: flex;
+  gap: 0;
+  height: 100%;
+}
+
+/* Sidebar */
+.sidebar-container {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.sidebar {
+  flex-shrink: 0;
+  padding-right: 16px;
+}
+
+.bookmarks-panel {
+  height: fit-content;
+}
+
+.panel-header {
+  padding: 0;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.panel-title .el-icon {
+  cursor: pointer;
+  transition: transform 0.3s ease;
+}
+
+.panel-title .el-icon.rotated {
+  transform: rotate(-90deg);
+}
+
+.bookmark-icon {
+  color: #f59e0b;
+}
+
+.bookmark-count {
+  margin-left: auto;
+}
+
+.bookmarks-list {
+  margin-top: 12px;
+}
+
+.bookmark-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bookmark-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.bookmark-item:hover {
+  background-color: rgba(255, 193, 7, 0.15);
+}
+
+.bookmark-avatar {
+  background-color: #fef3c7;
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+.bookmark-title {
+  flex: 1;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.bookmark-item:hover .bookmark-actions {
+  opacity: 1;
+}
+
+.empty-text {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+/* Main Area */
+.main-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: hidden;
+}
+
+.filters-card {
+  flex-shrink: 0;
+}
+
+.filter-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.table-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.table-card :deep(.el-card__body) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* Table Styles */
+.el-table {
+  flex: 1;
+}
+
+:deep(.el-table__row) {
   cursor: pointer;
 }
 
-/* Selected row - bright yellow background */
-.table-row-selected {
-  background-color: rgba(255, 193, 7, 0.25) !important;
-  border-left: 3px solid rgb(255, 193, 7) !important;
+:deep(.el-table__row.table-row-selected) {
+  background-color: rgba(255, 193, 7, 0.15) !important;
 }
 
-.table-row-selected:hover {
-  background-color: rgba(255, 193, 7, 0.35) !important;
+:deep(.el-table__row.table-row-selected td) {
+  border-left: 3px solid rgb(255, 193, 7);
 }
 
-/* Highlighted row for bookmark jump */
-.table-row-highlighted {
+:deep(.el-table__row.table-row-highlighted) {
   background-color: rgba(33, 150, 243, 0.3) !important;
-  border-left: 3px solid rgb(33, 150, 243) !important;
   animation: pulse-highlight 1.5s ease-in-out 3;
+}
+
+:deep(.el-table__row.table-row-highlighted td) {
+  border-left: 3px solid rgb(33, 150, 243);
 }
 
 @keyframes pulse-highlight {
@@ -1310,140 +1350,197 @@ watch(sidebarWidth, (newWidth) => {
   50% { background-color: rgba(33, 150, 243, 0.5); }
 }
 
-/* Table hover effect */
-:deep(.v-data-table__tr:hover) {
-  background-color: rgba(0, 0, 0, 0.04) !important;
-}
-
-/* Checkbox size */
-:deep(.v-checkbox) {
-  transform: scale(1.1);
-}
-
-/* Bookmark/Session list items */
-.bookmark-item,
-.session-item {
-  transition: all 0.2s ease;
-  margin: 2px 8px;
-  border-radius: 8px;
-}
-
-.bookmark-item:hover {
-  background-color: rgba(255, 193, 7, 0.15);
-}
-
-.session-item:hover {
-  background-color: rgba(25, 118, 210, 0.1);
-}
-
-/* Card title adjustments */
-:deep(.v-card-title) {
-  font-size: 0.95rem;
-}
-
-/* Panel toggle button rotation animation */
-.rotate-180 {
-  transform: rotate(180deg);
-  transition: transform 0.3s ease;
-}
-
-/* Stack cell styling */
 .stack-cell {
-  cursor: default;
-  line-height: 1.4;
-  padding: 2px 0;
-}
-
-.stack-cell.has-stack {
-  cursor: help;
-}
-
-.stack-cell.has-stack:hover {
-  background-color: rgba(158, 158, 158, 0.15);
-  border-radius: 4px;
-}
-
-/* Stack tooltip card styling */
-.stack-tooltip-card {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 12px !important;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  color: #666;
+  display: block;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
 }
 
-/* Message tooltip card styling */
-.message-tooltip-card {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12) !important;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 12px !important;
+.message-cell {
+  font-size: 14px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
+  word-break: break-word;
 }
 
-/* Tooltip header styling */
-.tooltip-header {
-  background: linear-gradient(135deg, #e3f2fd 0%, #f5f5f5 100%);
-  color: #424242;
-  letter-spacing: 0.3px;
-}
-
-/* Tooltip content styling */
-.tooltip-content {
-  line-height: 1.6;
+/* Pagination */
+.pagination-container {
+  flex-shrink: 0;
   padding: 16px;
-  background: #fafafa;
+  border-top: 1px solid #ebeef5;
 }
 
-/* Custom scrollbar for tooltip content */
-.tooltip-content::-webkit-scrollbar {
+/* Resizer */
+.resizer {
+  width: 4px;
+  cursor: col-resize;
+  background: #e0e0e0;
+  transition: background 0.2s, width 0.2s;
+  flex-shrink: 0;
+}
+
+.resizer:hover,
+.resizer.is-resizing {
+  background: #1976d2;
+  width: 6px;
+}
+
+/* Session Option */
+.session-option-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 0;
+}
+
+.session-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.session-name {
+  font-size: 14px;
+}
+
+.session-count {
+  color: #909399;
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.delete-icon {
+  color: #909399;
+  cursor: pointer;
+  transition: color 0.2s ease;
+  padding: 4px;
+}
+
+.delete-icon:hover {
+  color: #f56c6c;
+}
+
+/* Dialog Styles */
+.source-type-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.folder-selector {
+  margin-left: 24px;
+  margin-top: 8px;
+}
+
+.folder-btn {
+  width: 100%;
+}
+
+.url-input {
+  margin-left: 24px;
+  margin-top: 8px;
+}
+
+.bookmark-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: #909399;
+  font-size: 12px;
+}
+
+/* Transitions */
+.slide-fade-enter-active {
+  transition: all 0.3s ease-out;
+}
+
+.slide-fade-leave-active {
+  transition: all 0.3s cubic-bezier(1, 0.5, 0.8, 1);
+}
+
+.slide-fade-enter-from {
+  transform: translateX(-20px);
+  opacity: 0;
+}
+
+.slide-fade-leave-to {
+  transform: translateX(-20px);
+  opacity: 0;
+}
+
+.panel-slide-enter-active,
+.panel-slide-leave-active {
+  transition: all 0.3s ease;
+}
+
+.panel-slide-enter-from,
+.panel-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+/* Tooltip Styles */
+:deep(.stack-tooltip),
+:deep(.message-tooltip) {
+  max-width: 600px;
+}
+
+.tooltip-content {
+  padding: 16px;
+}
+
+.tooltip-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #ebeef5;
+  margin-bottom: 12px;
+}
+
+.tooltip-text {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+/* Scrollbar Styles */
+.tooltip-text::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-.tooltip-content::-webkit-scrollbar-track {
+.tooltip-text::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.05);
   border-radius: 4px;
 }
 
-.tooltip-content::-webkit-scrollbar-thumb {
+.tooltip-text::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.15);
   border-radius: 4px;
   transition: background 0.2s ease;
 }
 
-.tooltip-content::-webkit-scrollbar-thumb:hover {
+.tooltip-text::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.25);
 }
 
-/* Ensure tooltip content is readable */
-.stack-tooltip-card .v-card-text,
-.message-tooltip-card .v-card-text {
-  line-height: 1.5;
+/* Monospace font for timestamps */
+:deep(.el-table__body-wrapper .el-table__row td:first-child) {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
 }
-
-/* Fade transition for tooltip */
-.fade-transition-enter-active,
-.fade-transition-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-transition-enter-from,
-.fade-transition-leave-to {
-  opacity: 0;
-}
-
-.resizer {
-  width: 4px;
-  cursor: col-resize;
-  background: #e0e0e0;
-  transition: background 0.2s;
-  flex-shrink: 0;
-}
-.resizer:hover,
-.resizer.is-resizing {
-  background: #1976d2;
-}
-.resizer:hover {
-  width: 6px;
-}
-
 </style>
