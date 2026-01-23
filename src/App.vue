@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -136,6 +136,36 @@ async function openDirectory() {
 function onSessionChange() {
   levelFilter.value = 'ALL'
   refreshLogs()
+}
+
+// Start dragging the resizer
+function startResize(event) {
+  isResizing.value = true
+  event.preventDefault()
+}
+
+// Handle mouse move during resize
+function onMouseMove(event) {
+  if (!isResizing.value) return
+
+  const newWidth = event.clientX
+  const minWidth = 200
+  const maxWidth = window.innerWidth / 2
+
+  sidebarWidth.value = Math.max(minWidth, Math.min(maxWidth, newWidth))
+}
+
+// Handle mouse up to stop resizing
+function onMouseUp() {
+  isResizing.value = false
+}
+
+// Load sidebar width from localStorage
+function loadSidebarWidth() {
+  const saved = localStorage.getItem('sidebarWidth')
+  if (saved) {
+    sidebarWidth.value = parseInt(saved)
+  }
 }
 
 // Select local folder
@@ -589,11 +619,22 @@ function isHighlighted(entryId) {
 // Load sessions on mount
 onMounted(() => {
   loadSessions()
+  loadSidebarWidth()
 
   // Listen for HTTP progress events
   listen('http-progress', (event) => {
     loadingMessage.value = event.payload
   })
+
+  // Add resize event listeners
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+})
+
+onUnmounted(() => {
+  // Remove resize event listeners
+  document.removeEventListener('mousemove', onMouseMove)
+  document.removeEventListener('mouseup', onMouseUp)
 })
 
 // Watch dynamicLogLevels and reset levelFilter if current selection is not available
@@ -601,6 +642,11 @@ watch(dynamicLogLevels, (newLevels) => {
   if (levelFilter.value !== 'ALL' && !newLevels.includes(levelFilter.value)) {
     levelFilter.value = 'ALL'
   }
+})
+
+// Persist sidebar width to localStorage
+watch(sidebarWidth, (newWidth) => {
+  localStorage.setItem('sidebarWidth', newWidth)
 })
 </script>
 
