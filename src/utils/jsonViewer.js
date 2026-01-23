@@ -29,9 +29,10 @@ export function detectJson(message) {
 /**
  * Syntax highlight JSON with HTML spans
  * @param {*} jsonObj - The parsed JSON object
+ * @param {number} depth - Current nesting depth
  * @returns {string} HTML string with syntax highlighting
  */
-export function syntaxHighlightJson(jsonObj) {
+export function syntaxHighlightJson(jsonObj, depth = 0) {
   if (jsonObj === null) {
     return '<span style="color: #569cd6">null</span>'
   }
@@ -53,16 +54,19 @@ export function syntaxHighlightJson(jsonObj) {
       return '[]'
     }
 
-    let output = '['
+    let output = '<div class="json-array" data-depth="' + depth + '">'
+    output += '<span class="json-toggle" onclick="toggleJsonNode(this)">[-]</span> ['
+
     for (let i = 0; i < jsonObj.length; i++) {
-      output += '<div>'
-      output += syntaxHighlightJson(jsonObj[i])
+      output += '<div class="json-item" data-collapsed="false">'
+      output += syntaxHighlightJson(jsonObj[i], depth + 1)
       if (i < jsonObj.length - 1) {
         output += ','
       }
       output += '</div>'
     }
-    output += ']'
+
+    output += ']</div>'
     return output
   }
 
@@ -72,23 +76,48 @@ export function syntaxHighlightJson(jsonObj) {
       return '{}'
     }
 
-    let output = '{'
+    let output = '<div class="json-object" data-depth="' + depth + '">'
+    output += '<span class="json-toggle" onclick="toggleJsonNode(this)">[-]</span> {'
+
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i]
-      output += '<div>'
+      output += '<div class="json-item" data-collapsed="false">'
       output += '<span style="color: #9cdcfe">"' + escapeHtml(key) + '"</span>'
       output += ': '
-      output += syntaxHighlightJson(jsonObj[key])
+      output += syntaxHighlightJson(jsonObj[key], depth + 1)
       if (i < keys.length - 1) {
         output += ','
       }
       output += '</div>'
     }
-    output += '}'
+
+    output += '}</div>'
     return output
   }
 
   return String(jsonObj)
+}
+
+/**
+ * Toggle JSON node collapse/expand
+ * @param {HTMLElement} element - The toggle button element
+ */
+window.toggleJsonNode = function(element) {
+  const parent = element.parentElement
+  const items = parent.querySelectorAll(':scope > .json-item')
+  const isCollapsed = parent.getAttribute('data-collapsed') === 'true'
+
+  if (isCollapsed) {
+    // Expand
+    items.forEach(item => item.style.display = '')
+    parent.setAttribute('data-collapsed', 'false')
+    element.textContent = '[-]'
+  } else {
+    // Collapse
+    items.forEach(item => item.style.display = 'none')
+    parent.setAttribute('data-collapsed', 'true')
+    element.textContent = '[+]'
+  }
 }
 
 /**
