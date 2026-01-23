@@ -3,11 +3,35 @@
     "allow": [
       "Skill(auto_build_after_fix)",
       "Bash(pnpm tauri build:*)",
-      "Bash(cargo build:*)",
-      "Bash(cargo test:*)",
+      "Bash(git merge:*)",
       "Bash(pnpm build)",
+      "Bash(cargo test:*)",
+      "Bash(git branch:*)",
+      "Bash(git worktree remove:*)",
+      "Bash(git worktree:*)",
+      "Bash(git stash pop:*)",
+      "Bash(git stash:*)",
+      "Skill(superpowers:brainstorming)",
+      "Skill(superpowers:systematic-debugging)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Skill(superpowers:using-git-worktrees)",
+      "Bash(git check-ignore:*)",
+      "Bash(pnpm install)",
+      "Skill(superpowers:writing-plans)",
+      "Skill(superpowers:subagent-driven-development)",
+      "Bash(pnpm add:*)",
+      "Bash(pnpm list:*)",
+      "Bash(pnpm why:*)",
+      "Bash(pnpm install:*)",
+      "WebSearch",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(node:*)",
+      "Bash(git checkout:*)",
+      "Bash(cargo check:*)",
+      "Bash(git show:*)",
+      "Bash(pnpm test:*)"
     ]
   }
 }
