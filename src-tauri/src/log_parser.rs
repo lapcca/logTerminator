@@ -404,6 +404,7 @@ impl HtmlLogParser {
     ///
     /// # Examples
     /// ```
+    /// use logterminator_lib::log_parser::HtmlLogParser;
     /// assert_eq!(
     ///     HtmlLogParser::is_test_log_file("TestEnableTcpdump_ID_1---0.html"),
     ///     Some("TestEnableTcpdump_ID_1".to_string())
