@@ -23,6 +23,8 @@ const jumpToPage = ref(1) // 跳转到页码输入框的值
 // Sidebar width management
 const sidebarWidth = ref(300)  // Default width in pixels
 const isResizing = ref(false)  // Track if user is dragging
+const resizeStartX = ref(0)    // Mouse X position when drag starts
+const resizeStartWidth = ref(0) // Sidebar width when drag starts
 
 // Log source dialog
 const showSourceDialog = ref(false)
@@ -141,6 +143,8 @@ function onSessionChange() {
 // Start dragging the resizer
 function startResize(event) {
   isResizing.value = true
+  resizeStartX.value = event.clientX
+  resizeStartWidth.value = sidebarWidth.value
   event.preventDefault()
 }
 
@@ -148,7 +152,8 @@ function startResize(event) {
 function onMouseMove(event) {
   if (!isResizing.value) return
 
-  const newWidth = event.clientX
+  const deltaX = event.clientX - resizeStartX.value
+  const newWidth = resizeStartWidth.value + deltaX
   const minWidth = 200
   const maxWidth = window.innerWidth / 2
 
@@ -765,11 +770,10 @@ watch(sidebarWidth, (newWidth) => {
           <span class="text-truncate">{{ item.name }}</span>
         </template>
         <template v-slot:item="{ props, item }">
-          <v-list-item v-bind="props">
+          <v-list-item v-bind="props" :value="item.raw.id">
             <template v-slot:prepend>
               <v-icon size="small">{{ item.raw.source_type === 'http' ? 'mdi-web' : 'mdi-folder' }}</v-icon>
             </template>
-            <v-list-item-title>{{ item.raw.name }}</v-list-item-title>
             <v-list-item-subtitle>{{ item.raw.total_entries }} 条记录</v-list-item-subtitle>
           </v-list-item>
         </template>
@@ -874,14 +878,15 @@ watch(sidebarWidth, (newWidth) => {
               </v-expand-transition>
             </v-card>
           </v-col>
-          </v-expand-x-transition>
 
           <!-- Resizer -->
           <div
+            v-show="showSidebar"
             class="resizer"
             :class="{ 'is-resizing': isResizing }"
             @mousedown="startResize">
           </div>
+          </v-expand-x-transition>
 
           <!-- Main Content -->
           <v-col :style="{ flex: 1 }">
