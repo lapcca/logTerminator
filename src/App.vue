@@ -734,72 +734,60 @@ watch(sidebarWidth, (newWidth) => {
       </v-card>
     </v-dialog>
 
-    <!-- App Bar -->
-    <v-app-bar app color="primary" dark elevation="2">
-      <v-btn
-        icon
-        variant="tonal"
-        size="large"
-        @click="showSidebar = !showSidebar"
-        class="mr-3"
-        :title="showSidebar ? '收起左侧面板' : '展开左侧面板'"
-        style="background: rgba(255,255,255,0.15);">
-        <v-icon size="28">{{ showSidebar ? 'mdi-arrow-collapse-horizontal' : 'mdi-arrow-expand-horizontal' }}</v-icon>
-      </v-btn>
-      
-      <v-icon class="mr-2" size="28">mdi-file-document-multiple-outline</v-icon>
-      <span class="text-h6 font-weight-medium">日志查看器</span>
+    <!-- App Header -->
+    <el-header class="app-header">
+      <div class="header-content">
+        <div class="header-left">
+          <el-button
+            :icon="showSidebar ? ArrowRight : ArrowLeft"
+            circle
+            @click="showSidebar = !showSidebar"
+            :title="showSidebar ? '收起左侧面板' : '展开左侧面板'"
+            class="sidebar-toggle" />
+          <el-icon class="logo-icon" :size="28"><Document /></el-icon>
+          <span class="app-title">日志查看器</span>
 
-      <!-- Session Selector -->
-      <v-select
-        v-model="currentSession"
-        :items="sessions"
-        item-title="name"
-        item-value="id"
-        prepend-inner-icon="mdi-folder-multiple"
-        density="comfortable"
-        variant="solo"
-        flat
-        hide-details
-        style="max-width: 300px; margin-left: 20px"
-        @update:model-value="onSessionChange">
-        <template v-slot:selection="{ item }">
-          <v-icon :color="currentSession === item.id ? 'primary' : 'grey'" size="small" class="mr-2">
-            {{ item.raw.source_type === 'http' ? 'mdi-web' : 'mdi-folder' }}
-          </v-icon>
-          <span class="text-truncate">{{ item.name }}</span>
-        </template>
-        <template v-slot:item="{ props, item }">
-          <v-list-item v-bind="props" :value="item.raw.id">
-            <template v-slot:prepend>
-              <v-icon size="small">{{ item.raw.source_type === 'http' ? 'mdi-web' : 'mdi-folder' }}</v-icon>
-            </template>
-            <v-list-item-subtitle>{{ item.raw.total_entries }} 条记录</v-list-item-subtitle>
-          </v-list-item>
-        </template>
-      </v-select>
+          <!-- Session Selector -->
+          <el-select
+            v-model="currentSession"
+            placeholder="选择会话"
+            style="width: 300px; margin-left: 20px"
+            @change="onSessionChange">
+            <el-option
+              v-for="session in sessions"
+              :key="session.id"
+              :label="session.name"
+              :value="session.id">
+              <div class="session-option">
+                <el-icon><component :is="session.source_type === 'http' ? 'Link' : 'Folder'" /></el-icon>
+                <span>{{ session.name }}</span>
+                <span class="session-count">{{ session.total_entries }} 条记录</span>
+              </div>
+            </el-option>
+          </el-select>
+        </div>
 
-      <v-spacer></v-spacer>
-      
-      <!-- Loading indicator -->
-      <v-progress-linear
+        <div class="header-right">
+          <!-- Loading indicator -->
+          <span v-if="loadingMessage" class="loading-message">{{ loadingMessage }}</span>
+          <el-button
+            type="primary"
+            :icon="FolderOpened"
+            :loading="loading"
+            @click="openDirectory">
+            打开目录
+          </el-button>
+        </div>
+      </div>
+
+      <!-- Loading Progress -->
+      <el-progress
         v-if="loading"
-        indeterminate
-        color="white"
-        class="mr-4"
-        style="width: 200px;">
-      </v-progress-linear>
-      <span v-if="loadingMessage" class="text-body-2 mr-4 text-white">{{ loadingMessage }}</span>
-      
-      <v-btn
-        color="white"
-        variant="outlined"
-        prepend-icon="mdi-folder-open"
-        :loading="loading"
-        @click="openDirectory">
-        打开目录
-      </v-btn>
-    </v-app-bar>
+        :percentage="100"
+        :indeterminate="true"
+        :show-text="false"
+        class="loading-progress" />
+    </el-header>
 
     <v-main class="bg-grey-lighten-4">
       <v-container fluid class="pa-4">
@@ -1208,6 +1196,88 @@ watch(sidebarWidth, (newWidth) => {
 </template>
 
 <style scoped>
+/* App Header Styles */
+.app-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 0;
+  height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.header-content {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 64px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-toggle {
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: white;
+  transition: all 0.3s ease;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
+}
+
+.logo-icon {
+  color: white;
+}
+
+.app-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: white;
+  letter-spacing: 0.5px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.session-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.session-count {
+  color: #909399;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.loading-message {
+  color: white;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.loading-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+}
+
 /* Font for timestamps */
 .font-mono {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
