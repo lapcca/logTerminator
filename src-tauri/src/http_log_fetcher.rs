@@ -248,6 +248,7 @@ pub fn fetch_logs_from_http(
             total_entries: all_entries.len(),
             created_at: Some(Utc::now()),
             last_parsed_at: Some(Utc::now()),
+            source_type: Some("http".to_string()),
         };
 
         db_manager

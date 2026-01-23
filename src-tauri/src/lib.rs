@@ -80,6 +80,7 @@ fn parse_directory_blocking(
             total_entries,
             created_at: Some(chrono::Utc::now()),
             last_parsed_at: Some(chrono::Utc::now()),
+            source_type: Some("local".to_string()),
         };
 
         db_manager
