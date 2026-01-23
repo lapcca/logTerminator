@@ -1595,3 +1595,62 @@ function getTableRowClassName({ row }) {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
 }
 </style>
+
+<style>
+/* Message Tooltip Popover Styles */
+.message-tooltip-popover {
+  max-width: 80%;
+}
+
+.message-tooltip-popover .el-popover__body {
+  padding: 0;
+}
+
+.message-tooltip-popover .tooltip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid #dcdfe6;
+  background-color: #f5f7fa;
+}
+
+.message-tooltip-popover .view-toggles,
+.message-tooltip-popover .copy-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.message-tooltip-popover .tooltip-body {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.message-tooltip-popover .raw-view .message-text {
+  margin: 0;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-tooltip-popover .json-view {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.message-tooltip-popover .json-error {
+  color: #f56c6c;
+  padding: 12px;
+}
+
+.message-tooltip-popover .json-content {
+  background-color: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 4px;
+}
+</style>
