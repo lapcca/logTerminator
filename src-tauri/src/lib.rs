@@ -171,7 +171,7 @@ fn get_log_entries(
     session_id: String,
     offset: usize,
     limit: usize,
-    level_filter: Option<String>,
+    level_filter: Option<Vec<String>>, // Changed to Vec for multi-select
     search_term: Option<String>,
 ) -> Result<(Vec<LogEntry>, usize), String> {
     let db_manager = state.db_manager.lock().unwrap();
@@ -231,6 +231,15 @@ fn get_sessions(state: State<'_, AppState>) -> Result<Vec<TestSession>, String> 
         .map_err(|e| format!("Failed to get sessions: {}", e))
 }
 
+// Get all unique log levels for a session
+#[tauri::command]
+fn get_session_log_levels(state: State<'_, AppState>, session_id: String) -> Result<Vec<String>, String> {
+    let db_manager = state.db_manager.lock().unwrap();
+    db_manager
+        .get_session_log_levels(&session_id)
+        .map_err(|e| format!("Failed to get session log levels: {}", e))
+}
+
 // Delete test session
 #[tauri::command]
 fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
@@ -268,7 +277,7 @@ fn get_entry_page(
     state: State<'_, AppState>,
     entry_id: i64,
     items_per_page: usize,
-    level_filter: Option<String>,
+    level_filter: Option<Vec<String>>, // Changed to Vec for multi-select
     search_term: Option<String>,
 ) -> Result<Option<usize>, String> {
     let db_manager = state.db_manager.lock().unwrap();
@@ -307,6 +316,7 @@ pub fn run() {
             update_bookmark_title,
             get_entry_page,
             get_sessions,
+            get_session_log_levels,
             delete_session
         ])
         .run(tauri::generate_context!())

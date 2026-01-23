@@ -135,7 +135,7 @@ impl DatabaseManager {
         session_id: &str,
         offset: usize,
         limit: usize,
-        level_filter: Option<&str>,
+        level_filter: Option<&[String]>, // Changed to &[String] for multi-select
         search_term: Option<&str>,
     ) -> SqlResult<(Vec<LogEntry>, usize)> {
         // Build query dynamically
@@ -144,21 +144,38 @@ impl DatabaseManager {
                              FROM log_entries WHERE test_session_id = ?"
                 .to_string();
 
-        let mut where_conditions = Vec::new();
+        let mut where_conditions: Vec<String> = Vec::new();
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(session_id)];
 
-        if let Some(level) = level_filter {
-            // Skip empty string or "ALL" (no filtering)
-            if !level.is_empty() && level != "ALL" {
-                // Match both "ERROR" and "[ERROR]" for backward compatibility
-                where_conditions.push("(level = ? OR level = ?)");
-                params.push(Box::new(level.to_string()));
-                params.push(Box::new(format!("[{}]", level)));
+        // Handle level filter - support multiple levels
+        if let Some(levels) = level_filter {
+            // Skip if empty or contains only "ALL" (no filtering)
+            let filtered_levels: Vec<&String> = levels.iter()
+                .filter(|level| !level.is_empty() && *level != "ALL")
+                .collect();
+
+            if !filtered_levels.is_empty() {
+                // Build OR conditions for multiple levels using IN clause
+                let level_placeholders: Vec<String> = (0..filtered_levels.len() * 2)
+                    .map(|_| "?".to_string())
+                    .collect();
+
+                where_conditions.push(format!("(level IN ({}) OR level IN ({}))",
+                    level_placeholders[..filtered_levels.len()].join(", "),
+                    level_placeholders[filtered_levels.len()..].join(", ")));
+
+                // Add parameters for each level (with and without brackets)
+                for level in &filtered_levels {
+                    params.push(Box::new(level.to_string()));
+                }
+                for level in &filtered_levels {
+                    params.push(Box::new(format!("[{}]", level)));
+                }
             }
         }
 
         if let Some(search) = search_term {
-            where_conditions.push("(timestamp LIKE ? OR message LIKE ?)");
+            where_conditions.push("(timestamp LIKE ? OR message LIKE ?)".to_string());
             let search_pattern = format!("%{}%", search);
             params.push(Box::new(search_pattern.clone()));
             params.push(Box::new(search_pattern));
@@ -180,9 +197,9 @@ impl DatabaseManager {
             .conn
             .query_row(&count_query, &param_refs[..], |row| row.get(0))?;
 
-        // Add pagination
+        // Add pagination with secondary sort by id for consistent ordering
         let mut query = base_query;
-        query.push_str(" ORDER BY timestamp ASC LIMIT ? OFFSET ?");
+        query.push_str(" ORDER BY timestamp ASC, id ASC LIMIT ? OFFSET ?");
         params.push(Box::new(limit));
         params.push(Box::new(offset));
 
@@ -313,35 +330,52 @@ impl DatabaseManager {
         &self,
         entry_id: i64,
         items_per_page: usize,
-        level_filter: Option<&str>,
+        level_filter: Option<&[String]>, // Changed to &[String] for multi-select
         search_term: Option<&str>,
     ) -> SqlResult<Option<usize>> {
-        // First get the session_id and timestamp for this entry
-        let entry_info: Option<(String, String)> = self
+        // First get the session_id, timestamp, and id for this entry
+        let entry_info: Option<(String, String, i64)> = self
             .conn
             .query_row(
-                "SELECT test_session_id, timestamp FROM log_entries WHERE id = ?",
+                "SELECT test_session_id, timestamp, id FROM log_entries WHERE id = ?",
                 [entry_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
 
-        let (session_id, entry_timestamp) = match entry_info {
+        let (session_id, entry_timestamp, entry_id_value) = match entry_info {
             Some(info) => info,
             None => return Ok(None), // Entry not found
         };
 
         // Build the same WHERE conditions as get_entries_paginated
-        let mut where_conditions = vec!["test_session_id = ?".to_string()];
+        let mut where_conditions: Vec<String> = vec!["test_session_id = ?".to_string()];
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(session_id)];
 
-        if let Some(level) = level_filter {
-            // Skip empty string or "ALL" (no filtering)
-            if !level.is_empty() && level != "ALL" {
-                // Match both "ERROR" and "[ERROR]" for backward compatibility
-                where_conditions.push("(level = ? OR level = ?)".to_string());
-                params.push(Box::new(level.to_string()));
-                params.push(Box::new(format!("[{}]", level)));
+        // Handle level filter - support multiple levels
+        if let Some(levels) = level_filter {
+            // Skip if empty or contains only "ALL" (no filtering)
+            let filtered_levels: Vec<&String> = levels.iter()
+                .filter(|level| !level.is_empty() && *level != "ALL")
+                .collect();
+
+            if !filtered_levels.is_empty() {
+                // Build OR conditions for multiple levels using IN clause
+                let level_placeholders: Vec<String> = (0..filtered_levels.len() * 2)
+                    .map(|_| "?".to_string())
+                    .collect();
+
+                where_conditions.push(format!("(level IN ({}) OR level IN ({}))",
+                    level_placeholders[..filtered_levels.len()].join(", "),
+                    level_placeholders[filtered_levels.len()..].join(", ")));
+
+                // Add parameters for each level (with and without brackets)
+                for level in &filtered_levels {
+                    params.push(Box::new(level.to_string()));
+                }
+                for level in &filtered_levels {
+                    params.push(Box::new(format!("[{}]", level)));
+                }
             }
         }
 
@@ -352,9 +386,12 @@ impl DatabaseManager {
             params.push(Box::new(search_pattern));
         }
 
-        // Count entries that come before this entry (same conditions + timestamp < entry_timestamp)
-        where_conditions.push("timestamp < ?".to_string());
+        // Count entries that come before this entry (same ordering: timestamp ASC, id ASC)
+        // This matches entries with (timestamp < entry_timestamp) OR (timestamp = entry_timestamp AND id < entry_id)
+        where_conditions.push("((timestamp < ?) OR (timestamp = ? AND id < ?))".to_string());
+        params.push(Box::new(entry_timestamp.clone()));
         params.push(Box::new(entry_timestamp));
+        params.push(Box::new(entry_id_value));
 
         let count_query = format!(
             "SELECT COUNT(*) FROM log_entries WHERE {}",
@@ -369,5 +406,14 @@ impl DatabaseManager {
         // Calculate page number (1-indexed)
         let page = (count_before / items_per_page) + 1;
         Ok(Some(page))
+    }
+
+    pub fn get_session_log_levels(&self, session_id: &str) -> SqlResult<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT level FROM log_entries WHERE test_session_id = ? ORDER BY level"
+        )?;
+
+        let level_iter = stmt.query_map([session_id], |row| row.get(0))?;
+        level_iter.collect()
     }
 }

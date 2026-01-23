@@ -38,7 +38,8 @@ const bookmarks = ref([])
 const loading = ref(false)
 const loadingMessage = ref('') // 显示加载状态信息
 const searchTerm = ref('')
-const levelFilter = ref('ALL')
+const levelFilter = ref(['ALL']) // Changed to array for multi-select
+const sessionLogLevels = ref([]) // Store all log levels for the current session
 const totalEntries = ref(0)
 const sessions = ref([])
 const showSidebar = ref(true) // 控制左侧面板显示/隐藏
@@ -95,9 +96,6 @@ const itemsPerPageOptions = [
   { title: '500 条/页', value: 500 },
 ]
 
-// Log levels for filtering
-const logLevels = ['ALL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'TRACE']
-
 // Priority order for log levels (higher priority first)
 const levelPriority = {
   'ERROR': 5,
@@ -107,15 +105,13 @@ const levelPriority = {
   'TRACE': 1
 }
 
-// Dynamic log levels based on current session data
-const dynamicLogLevels = computed(() => {
-  if (!currentSession.value || logEntries.value.length === 0) {
+// Computed property for sorted log levels (with ALL at the beginning)
+const sortedLogLevels = computed(() => {
+  if (sessionLogLevels.value.length === 0) {
     return ['ALL']
   }
-  // Get unique levels from current log entries
-  const uniqueLevels = [...new Set(logEntries.value.map(entry => entry.level))]
   // Sort by priority (higher priority first)
-  const sortedLevels = uniqueLevels.sort((a, b) => {
+  const sortedLevels = [...sessionLogLevels.value].sort((a, b) => {
     const priorityA = levelPriority[a] || 0
     const priorityB = levelPriority[b] || 0
     return priorityB - priorityA
@@ -161,9 +157,25 @@ async function openDirectory() {
   httpUrl.value = ''
 }
 
+// Fetch all log levels for the current session
+async function fetchSessionLogLevels() {
+  if (!currentSession.value) {
+    sessionLogLevels.value = []
+    return
+  }
+
+  try {
+    sessionLogLevels.value = await invoke('get_session_log_levels', { sessionId: currentSession.value })
+  } catch (error) {
+    console.error('Error fetching session log levels:', error)
+    sessionLogLevels.value = []
+  }
+}
+
 // Handle session change from selector
-function onSessionChange() {
-  levelFilter.value = 'ALL'
+async function onSessionChange() {
+  levelFilter.value = ['ALL'] // Reset to array with ALL
+  await fetchSessionLogLevels() // Fetch all log levels for this session
   refreshLogs()
 }
 
@@ -640,13 +652,16 @@ async function jumpToBookmark(bookmark) {
 // Highlight and scroll to entry
 function highlightAndScroll(entryId) {
   highlightedEntryId.value = entryId
-  
-  // Scroll to element
-  const element = document.querySelector(`[data-entry-id="${entryId}"]`)
-  if (element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
-  
+
+  // Scroll to element using the entry-id class
+  // Wait for nextTick to ensure DOM is updated
+  nextTick(() => {
+    const element = document.querySelector(`.entry-id-${entryId}`)
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  })
+
   // Remove highlight after animation
   setTimeout(() => {
     highlightedEntryId.value = null
@@ -679,11 +694,38 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', onMouseUp)
 })
 
-// Watch dynamicLogLevels and reset levelFilter if current selection is not available
-watch(dynamicLogLevels, (newLevels) => {
-  if (levelFilter.value !== 'ALL' && !newLevels.includes(levelFilter.value)) {
-    levelFilter.value = 'ALL'
+// Watch sortedLogLevels and reset levelFilter if current selection is not available
+watch(sortedLogLevels, (newLevels) => {
+  // For multi-select: if ALL is selected or any selected level is not available, reset to ALL
+  const hasAll = levelFilter.value.includes('ALL')
+  const hasInvalid = levelFilter.value.some(level => level !== 'ALL' && !newLevels.includes(level))
+  if (hasInvalid) {
+    levelFilter.value = ['ALL']
   }
+})
+
+// Watch levelFilter for changes and handle multi-select logic
+watch(levelFilter, (newValues, oldValues) => {
+  // Avoid infinite loop - only process if actually changed
+  if (JSON.stringify(newValues) === JSON.stringify(oldValues)) {
+    return
+  }
+
+  // If nothing is selected, default to ALL
+  if (newValues.length === 0) {
+    levelFilter.value = ['ALL']
+    return
+  }
+
+  // If ALL is selected with any other option, remove ALL (keep other selections)
+  if (newValues.includes('ALL') && newValues.length > 1) {
+    const filtered = newValues.filter(v => v !== 'ALL')
+    levelFilter.value = filtered
+    return
+  }
+
+  // Refresh logs when filter changes
+  refreshLogs()
 })
 
 // Persist sidebar width to localStorage
@@ -724,6 +766,8 @@ function handleSizeChange(size) {
 // Get table row class name
 function getTableRowClassName({ row }) {
   const classes = []
+  // Add entry-id class for scroll-to functionality
+  classes.push(`entry-id-${row.id}`)
   if (selectedEntryIds.value.includes(row.id)) {
     classes.push('table-row-selected')
   }
@@ -822,19 +866,24 @@ function getTableRowClassName({ row }) {
               :key="session.id"
               :label="session.name"
               :value="session.id">
-              <div class="session-option-item">
-                <div class="session-info">
-                  <el-icon><component :is="session.source_type === 'http' ? 'Link' : 'Folder'" /></el-icon>
-                  <span class="session-name">{{ session.name }}</span>
-                  <span class="session-count">{{ session.total_entries }} 条记录</span>
+              <el-tooltip
+                :content="session.directory_path"
+                placement="right"
+                :show-after="300">
+                <div class="session-option-item">
+                  <div class="session-info">
+                    <el-icon><component :is="session.source_type === 'http' ? 'Link' : 'Folder'" /></el-icon>
+                    <span class="session-name">{{ session.name }}</span>
+                    <span class="session-count">{{ session.total_entries }} 条记录</span>
+                  </div>
+                  <el-icon
+                    class="delete-icon"
+                    :size="16"
+                    @click.stop="confirmDeleteSession(session)">
+                    <Delete />
+                  </el-icon>
                 </div>
-                <el-icon
-                  class="delete-icon"
-                  :size="16"
-                  @click.stop="confirmDeleteSession(session)">
-                  <Delete />
-                </el-icon>
-              </div>
+              </el-tooltip>
             </el-option>
           </el-select>
         </div>
@@ -957,19 +1006,21 @@ function getTableRowClassName({ row }) {
                       :value="opt.value" />
                   </el-select>
                 </el-col>
-                <el-col :span="4">
+                <el-col :span="8">
                   <el-select
                     v-model="levelFilter"
                     placeholder="日志级别"
-                    @change="refreshLogs">
+                    multiple
+                    clearable
+                    style="width: 100%">
                     <el-option
-                      v-for="level in dynamicLogLevels"
+                      v-for="level in sortedLogLevels"
                       :key="level"
                       :label="level"
                       :value="level" />
                   </el-select>
                 </el-col>
-                <el-col :span="8">
+                <el-col :span="6">
                   <el-input
                     v-model="searchTerm"
                     placeholder="搜索日志内容..."
@@ -978,7 +1029,7 @@ function getTableRowClassName({ row }) {
                     @input="debouncedSearch">
                   </el-input>
                 </el-col>
-                <el-col :span="8" class="filter-actions">
+                <el-col :span="6" class="filter-actions">
                   <el-button
                     type="primary"
                     :icon="Refresh"
@@ -999,7 +1050,8 @@ function getTableRowClassName({ row }) {
                 stripe
                 highlight-current-row
                 @row-click="toggleRowSelection"
-                :row-class-name="getTableRowClassName">
+                :row-class-name="getTableRowClassName"
+                :row-key="(row) => row.id">
                 <el-table-column type="selection" width="50" />
                 <el-table-column prop="timestamp" label="时间戳" width="180" />
                 <el-table-column prop="level" label="级别" width="90">
