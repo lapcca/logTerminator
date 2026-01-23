@@ -830,6 +830,13 @@ watch(dynamicLogLevels, (newLevels) => {
           </v-col>
           </v-expand-x-transition>
 
+          <!-- Resizer -->
+          <div
+            class="resizer"
+            :class="{ 'is-resizing': isResizing }"
+            @mousedown="startResize">
+          </div>
+
           <!-- Main Content -->
           <v-col :style="{ flex: 1 }">
             <!-- Filters Card -->
@@ -1302,13 +1309,28 @@ watch(dynamicLogLevels, (newLevels) => {
   opacity: 0;
 }
 
+.resizer {
+  width: 4px;
+  cursor: col-resize;
+  background: #e0e0e0;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.resizer:hover,
+.resizer.is-resizing {
+  background: #1976d2;
+}
+.resizer:hover {
+  width: 6px;
+}
+
 /* Responsive adjustments */
 @media (max-width: 960px) {
   .v-col-3 {
     flex: 0 0 100%;
     max-width: 100%;
   }
-  
+
   .v-col-9,
   .v-col-12 {
     flex: 0 0 100%;
