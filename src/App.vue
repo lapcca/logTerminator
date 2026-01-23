@@ -756,7 +756,7 @@ watch(dynamicLogLevels, (newLevels) => {
         <v-row>
           <!-- Left Sidebar -->
           <v-expand-x-transition>
-            <v-col v-if="showSidebar" cols="3" class="pr-4">
+            <v-col v-if="showSidebar" :style="{ width: sidebarWidth + 'px', flexShrink: 0 }" class="pr-4">
               <!-- Bookmarks Panel -->
             <v-card class="mb-3" elevation="2">
               <v-card-title class="d-flex align-center py-2 px-4 bg-amber-lighten-5">
@@ -831,7 +831,7 @@ watch(dynamicLogLevels, (newLevels) => {
           </v-expand-x-transition>
 
           <!-- Main Content -->
-          <v-col :cols="showSidebar ? 9 : 12">
+          <v-col :style="{ flex: 1 }">
             <!-- Filters Card -->
             <v-card class="mb-3" elevation="2">
               <v-card-text class="pa-4">
