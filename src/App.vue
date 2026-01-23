@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
+import { listen } from '@tauri-apps/api/event'
 
 // Reactive data
 const currentSession = ref('')
@@ -19,6 +20,21 @@ const showSessionsPanel = ref(true) // 控制测试会话面板展开/折叠
 const selectedEntryIds = ref([]) // 选中的日志条目ID
 const highlightedEntryId = ref(null) // 当前高亮的条目ID
 const jumpToPage = ref(1) // 跳转到页码输入框的值
+
+// Log source dialog
+const showSourceDialog = ref(false)
+const sourceType = ref('folder') // 'folder' or 'url'
+const httpUrl = ref('')
+const selectedFolderPath = ref('')
+
+// Helper for dialog
+const canOpen = computed(() => {
+  if (sourceType.value === 'folder') {
+    return selectedFolderPath.value !== ''
+  } else {
+    return httpUrl.value !== '' && httpUrl.value.match(/^https?:\/\//)
+  }
+})
 
 // Bookmark editing
 const showEditBookmarkDialog = ref(false) // 控制编辑书签对话框显示
@@ -109,44 +125,104 @@ const someSelected = computed(() => {
 // Computed page count
 const totalPages = computed(() => Math.ceil(totalEntries.value / options.itemsPerPage))
 
-// Open log directory
+// Show source dialog
 async function openDirectory() {
+  showSourceDialog.value = true
+  sourceType.value = 'folder'
+  selectedFolderPath.value = ''
+  httpUrl.value = ''
+}
+
+// Select local folder
+async function selectLocalFolder() {
   try {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: '选择日志目录'
+      title: 'Select Log Directory'
     })
-
     if (selected) {
-      loading.value = true
-      loadingMessage.value = '正在扫描目录...'
-      selectedEntryIds.value = [] // 清空选择
-
-      try {
-        const sessionIds = await invoke('parse_log_directory', { directoryPath: selected })
-        loadingMessage.value = `发现 ${sessionIds.length} 个测试组`
-
-        await loadSessions()
-
-        if (sessionIds.length > 0) {
-          currentSession.value = sessionIds[0]
-          await refreshLogs()
-          loadingMessage.value = `加载完成！已加载 ${sessionIds.length} 个测试`
-        }
-      } catch (error) {
-        console.error('Error processing directory:', error)
-        loadingMessage.value = ''
-        alert(`处理目录时出错：${error}`)
-      } finally {
-        setTimeout(() => {
-          loading.value = false
-          loadingMessage.value = ''
-        }, 500)
-      }
+      selectedFolderPath.value = selected
     }
   } catch (error) {
-    console.error('Error opening directory:', error)
+    console.error('Error selecting folder:', error)
+  }
+}
+
+// Open log source (folder or URL)
+async function openLogSource() {
+  showSourceDialog.value = false
+
+  if (sourceType.value === 'url' && httpUrl.value) {
+    await loadFromHttpUrl(httpUrl.value)
+  } else if (sourceType.value === 'folder' && selectedFolderPath.value) {
+    await loadFromDirectory(selectedFolderPath.value)
+  }
+}
+
+// Load from HTTP URL
+async function loadFromHttpUrl(url) {
+  loading.value = true
+  loadingMessage.value = 'Connecting to server...'
+  selectedEntryIds.value = []
+
+  try {
+    const sessionIds = await invoke('parse_log_http_url', { url })
+    loadingMessage.value = `Found ${sessionIds.length} test session(s)`
+
+    await loadSessions()
+
+    if (sessionIds.length > 0) {
+      currentSession.value = sessionIds[0]
+      await refreshLogs()
+      loadingMessage.value = `Loaded ${sessionIds.length} test session(s) from server`
+    }
+  } catch (error) {
+    console.error('Error loading from HTTP:', error)
+    let userMsg = error
+    if (error.includes('InvalidUrl')) {
+      userMsg = 'Invalid URL format. Please enter a valid HTTP/HTTPS URL.'
+    } else if (error.includes('Timeout')) {
+      userMsg = 'Request timed out. The server may be slow or unreachable.'
+    } else if (error.includes('DirectoryListingNotFound')) {
+      userMsg = 'Could not find directory listing. Check that the URL points to a directory.'
+    }
+    alert(`Failed to load logs: ${userMsg}`)
+    loadingMessage.value = ''
+  } finally {
+    setTimeout(() => {
+      loading.value = false
+      loadingMessage.value = ''
+    }, 500)
+  }
+}
+
+// Load from local directory
+async function loadFromDirectory(directoryPath) {
+  loading.value = true
+  loadingMessage.value = 'Scanning directory...'
+  selectedEntryIds.value = []
+
+  try {
+    const sessionIds = await invoke('parse_log_directory', { directoryPath })
+    loadingMessage.value = `Found ${sessionIds.length} test session(s)`
+
+    await loadSessions()
+
+    if (sessionIds.length > 0) {
+      currentSession.value = sessionIds[0]
+      await refreshLogs()
+      loadingMessage.value = `Loaded ${sessionIds.length} test session(s)`
+    }
+  } catch (error) {
+    console.error('Error loading from directory:', error)
+    alert(`Error loading directory: ${error}`)
+    loadingMessage.value = ''
+  } finally {
+    setTimeout(() => {
+      loading.value = false
+      loadingMessage.value = ''
+    }, 500)
   }
 }
 
@@ -508,6 +584,11 @@ function isHighlighted(entryId) {
 // Load sessions on mount
 onMounted(() => {
   loadSessions()
+
+  // Listen for HTTP progress events
+  listen('http-progress', (event) => {
+    loadingMessage.value = event.payload
+  })
 })
 
 // Watch dynamicLogLevels and reset levelFilter if current selection is not available
@@ -520,6 +601,52 @@ watch(dynamicLogLevels, (newLevels) => {
 
 <template>
   <v-app>
+    <!-- Log Source Dialog -->
+    <v-dialog v-model="showSourceDialog" max-width="500">
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <v-icon class="mr-2">mdi-folder-open</v-icon>
+          Open Log Source
+        </v-card-title>
+        <v-card-text class="pt-4">
+          <v-radio-group v-model="sourceType">
+            <v-radio label="Local Folder" value="folder"></v-radio>
+            <v-btn
+              v-if="sourceType === 'folder'"
+              @click="selectLocalFolder"
+              variant="outlined"
+              prepend-icon="mdi-folder"
+              class="ml-8 mb-4">
+              {{ selectedFolderPath || 'Browse...' }}
+            </v-btn>
+
+            <v-radio label="HTTP Server" value="url" class="mt-4"></v-radio>
+            <v-text-field
+              v-if="sourceType === 'url'"
+              v-model="httpUrl"
+              label="Enter URL"
+              variant="outlined"
+              placeholder="http://logs.example.com/"
+              prepend-inner-icon="mdi-web"
+              class="ml-8"
+              clearable>
+            </v-text-field>
+          </v-radio-group>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn variant="text" @click="showSourceDialog = false">Cancel</v-btn>
+          <v-btn
+            color="primary"
+            variant="flat"
+            :disabled="!canOpen"
+            @click="openLogSource">
+            Open
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Edit Bookmark Dialog -->
     <v-dialog v-model="showEditBookmarkDialog" max-width="400">
       <v-card>
