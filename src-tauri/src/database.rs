@@ -77,19 +77,26 @@ impl DatabaseManager {
             [],
         )?;
 
+        // Add source_type column if not exists (for existing databases)
+        conn.execute(
+            "ALTER TABLE test_sessions ADD COLUMN source_type TEXT DEFAULT 'local'",
+            [],
+        ).ok();
+
         Ok(())
     }
 
     pub fn create_test_session(&self, session: &TestSession) -> SqlResult<String> {
         self.conn.execute(
-            "INSERT INTO test_sessions (id, name, directory_path, file_count, total_entries, last_parsed_at)
-             VALUES (?, ?, ?, ?, ?, datetime('now'))",
+            "INSERT INTO test_sessions (id, name, directory_path, file_count, total_entries, source_type, last_parsed_at)
+             VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
             params![
                 &session.id,
                 &session.name,
                 &session.directory_path,
                 session.file_count,
-                session.total_entries
+                session.total_entries,
+                session.source_type.as_deref().unwrap_or("local")
             ],
         )?;
         Ok(session.id.clone())
@@ -256,7 +263,7 @@ impl DatabaseManager {
 
     pub fn get_sessions(&self) -> SqlResult<Vec<TestSession>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, directory_path, file_count, total_entries, created_at, last_parsed_at
+            "SELECT id, name, directory_path, file_count, total_entries, created_at, last_parsed_at, source_type
              FROM test_sessions ORDER BY last_parsed_at DESC",
         )?;
 
@@ -269,6 +276,7 @@ impl DatabaseManager {
                 total_entries: row.get(4)?,
                 created_at: None,
                 last_parsed_at: None,
+                source_type: row.get(7)?,
             })
         })?;
 

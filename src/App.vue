@@ -833,7 +833,7 @@ watch(dynamicLogLevels, (newLevels) => {
                             <v-icon
                               :color="currentSession === session.id ? 'white' : 'grey'"
                               size="small">
-                              mdi-folder
+                              {{ session.source_type === 'http' ? 'mdi-web' : 'mdi-folder' }}
                             </v-icon>
                           </v-avatar>
                         </template>

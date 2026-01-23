@@ -36,6 +36,8 @@ pub struct TestSession {
     pub total_entries: usize,
     pub created_at: Option<DateTime<Utc>>,
     pub last_parsed_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_type: Option<String>,
 }
 
 pub struct HtmlLogParser;
