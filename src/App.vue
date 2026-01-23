@@ -20,6 +20,10 @@ const selectedEntryIds = ref([]) // 选中的日志条目ID
 const highlightedEntryId = ref(null) // 当前高亮的条目ID
 const jumpToPage = ref(1) // 跳转到页码输入框的值
 
+// Sidebar width management
+const sidebarWidth = ref(300)  // Default width in pixels
+const isResizing = ref(false)  // Track if user is dragging
+
 // Log source dialog
 const showSourceDialog = ref(false)
 const sourceType = ref('folder') // 'folder' or 'url'
