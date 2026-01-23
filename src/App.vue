@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -16,7 +16,6 @@ const totalEntries = ref(0)
 const sessions = ref([])
 const showSidebar = ref(true) // 控制左侧面板显示/隐藏
 const showBookmarksPanel = ref(true) // 控制书签面板展开/折叠
-const showSessionsPanel = ref(true) // 控制测试会话面板展开/折叠
 const selectedEntryIds = ref([]) // 选中的日志条目ID
 const highlightedEntryId = ref(null) // 当前高亮的条目ID
 const jumpToPage = ref(1) // 跳转到页码输入框的值
@@ -48,10 +47,6 @@ const editingBookmarkTitle = ref('') // 编辑时的临时标题
 // Toggle functions
 function toggleBookmarksPanel() {
   showBookmarksPanel.value = !showBookmarksPanel.value
-}
-
-function toggleSessionsPanel() {
-  showSessionsPanel.value = !showSessionsPanel.value
 }
 
 // Data table options
@@ -135,6 +130,42 @@ async function openDirectory() {
   sourceType.value = 'folder'
   selectedFolderPath.value = ''
   httpUrl.value = ''
+}
+
+// Handle session change from selector
+function onSessionChange() {
+  levelFilter.value = 'ALL'
+  refreshLogs()
+}
+
+// Start dragging the resizer
+function startResize(event) {
+  isResizing.value = true
+  event.preventDefault()
+}
+
+// Handle mouse move during resize
+function onMouseMove(event) {
+  if (!isResizing.value) return
+
+  const newWidth = event.clientX
+  const minWidth = 200
+  const maxWidth = window.innerWidth / 2
+
+  sidebarWidth.value = Math.max(minWidth, Math.min(maxWidth, newWidth))
+}
+
+// Handle mouse up to stop resizing
+function onMouseUp() {
+  isResizing.value = false
+}
+
+// Load sidebar width from localStorage
+function loadSidebarWidth() {
+  const saved = localStorage.getItem('sidebarWidth')
+  if (saved) {
+    sidebarWidth.value = parseInt(saved)
+  }
 }
 
 // Select local folder
@@ -588,11 +619,22 @@ function isHighlighted(entryId) {
 // Load sessions on mount
 onMounted(() => {
   loadSessions()
+  loadSidebarWidth()
 
   // Listen for HTTP progress events
   listen('http-progress', (event) => {
     loadingMessage.value = event.payload
   })
+
+  // Add resize event listeners
+  document.addEventListener('mousemove', onMouseMove)
+  document.addEventListener('mouseup', onMouseUp)
+})
+
+onUnmounted(() => {
+  // Remove resize event listeners
+  document.removeEventListener('mousemove', onMouseMove)
+  document.removeEventListener('mouseup', onMouseUp)
 })
 
 // Watch dynamicLogLevels and reset levelFilter if current selection is not available
@@ -600,6 +642,11 @@ watch(dynamicLogLevels, (newLevels) => {
   if (levelFilter.value !== 'ALL' && !newLevels.includes(levelFilter.value)) {
     levelFilter.value = 'ALL'
   }
+})
+
+// Persist sidebar width to localStorage
+watch(sidebarWidth, (newWidth) => {
+  localStorage.setItem('sidebarWidth', newWidth)
 })
 </script>
 
@@ -697,7 +744,37 @@ watch(dynamicLogLevels, (newLevels) => {
       
       <v-icon class="mr-2" size="28">mdi-file-document-multiple-outline</v-icon>
       <span class="text-h6 font-weight-medium">日志查看器</span>
-      
+
+      <!-- Session Selector -->
+      <v-select
+        v-model="currentSession"
+        :items="sessions"
+        item-title="name"
+        item-value="id"
+        prepend-inner-icon="mdi-folder-multiple"
+        density="comfortable"
+        variant="solo"
+        flat
+        hide-details
+        style="max-width: 300px; margin-left: 20px"
+        @update:model-value="onSessionChange">
+        <template v-slot:selection="{ item }">
+          <v-icon :color="currentSession === item.id ? 'primary' : 'grey'" size="small" class="mr-2">
+            {{ item.raw.source_type === 'http' ? 'mdi-web' : 'mdi-folder' }}
+          </v-icon>
+          <span class="text-truncate">{{ item.name }}</span>
+        </template>
+        <template v-slot:item="{ props, item }">
+          <v-list-item v-bind="props">
+            <template v-slot:prepend>
+              <v-icon size="small">{{ item.raw.source_type === 'http' ? 'mdi-web' : 'mdi-folder' }}</v-icon>
+            </template>
+            <v-list-item-title>{{ item.raw.name }}</v-list-item-title>
+            <v-list-item-subtitle>{{ item.raw.total_entries }} 条记录</v-list-item-subtitle>
+          </v-list-item>
+        </template>
+      </v-select>
+
       <v-spacer></v-spacer>
       
       <!-- Loading indicator -->
@@ -725,7 +802,7 @@ watch(dynamicLogLevels, (newLevels) => {
         <v-row>
           <!-- Left Sidebar -->
           <v-expand-x-transition>
-            <v-col v-if="showSidebar" cols="3" class="pr-4">
+            <v-col v-if="showSidebar" :style="{ width: sidebarWidth + 'px', flexShrink: 0 }" class="pr-4">
               <!-- Bookmarks Panel -->
             <v-card class="mb-3" elevation="2">
               <v-card-title class="d-flex align-center py-2 px-4 bg-amber-lighten-5">
@@ -796,84 +873,18 @@ watch(dynamicLogLevels, (newLevels) => {
                 </div>
               </v-expand-transition>
             </v-card>
-
-            <!-- Sessions Panel -->
-            <v-card elevation="2">
-              <v-card-title class="d-flex align-center py-2 px-4 bg-blue-grey-lighten-5">
-                <v-btn
-                  icon
-                  variant="text"
-                  size="small"
-                  @click="showSessionsPanel = !showSessionsPanel"
-                  :title="showSessionsPanel ? '收起测试会话面板' : '展开测试会话面板'"
-                  class="mr-1">
-                  <v-icon :class="{ 'rotate-180': !showSessionsPanel }" size="20">
-                    mdi-chevron-down
-                  </v-icon>
-                </v-btn>
-                <v-icon color="blue-grey" class="mr-2">mdi-folder-multiple</v-icon>
-                <span class="font-weight-medium">测试会话</span>
-                <v-chip size="small" color="blue-grey" variant="flat" class="ml-2">
-                  {{ sessions.length }}
-                </v-chip>
-              </v-card-title>
-              <v-expand-transition>
-                <div v-show="showSessionsPanel">
-                  <v-divider></v-divider>
-                  <v-card-text class="pa-0" style="max-height: calc(100vh - 500px); overflow-y: auto;">
-                    <v-list v-if="sessions.length > 0" density="comfortable">
-                      <v-list-item
-                        v-for="session in sessions"
-                        :key="session.id"
-                        :class="{ 'bg-primary-lighten-5': currentSession === session.id }"
-                        @click="currentSession = session.id; levelFilter = 'ALL'; refreshLogs()"
-                        class="session-item px-3"
-                        rounded="sm">
-                        <template v-slot:prepend>
-                          <v-avatar
-                            :color="currentSession === session.id ? 'primary' : 'grey-lighten-2'"
-                            size="32"
-                            class="mr-3">
-                            <v-icon
-                              :color="currentSession === session.id ? 'white' : 'grey'"
-                              size="small">
-                              {{ session.source_type === 'http' ? 'mdi-web' : 'mdi-folder' }}
-                            </v-icon>
-                          </v-avatar>
-                        </template>
-                        <v-list-item-title class="text-body-2 font-weight-medium">
-                          {{ session.name }}
-                        </v-list-item-title>
-                        <v-list-item-subtitle class="text-caption">
-                          {{ session.total_entries }} 条记录
-                        </v-list-item-subtitle>
-                        <template v-slot:append>
-                          <v-btn
-                            icon
-                            variant="text"
-                            size="small"
-                            color="grey"
-                            @click.stop="deleteSession(session.id, $event)"
-                            title="删除会话">
-                            <v-icon size="small">mdi-delete</v-icon>
-                          </v-btn>
-                        </template>
-                      </v-list-item>
-                    </v-list>
-                    <div v-else class="pa-6 text-center text-grey">
-                      <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-folder-outline</v-icon>
-                      <div class="text-body-2">暂无会话</div>
-                      <div class="text-caption">打开目录加载日志</div>
-                    </div>
-                  </v-card-text>
-                </div>
-              </v-expand-transition>
-            </v-card>
           </v-col>
           </v-expand-x-transition>
 
+          <!-- Resizer -->
+          <div
+            class="resizer"
+            :class="{ 'is-resizing': isResizing }"
+            @mousedown="startResize">
+          </div>
+
           <!-- Main Content -->
-          <v-col :cols="showSidebar ? 9 : 12">
+          <v-col :style="{ flex: 1 }">
             <!-- Filters Card -->
             <v-card class="mb-3" elevation="2">
               <v-card-text class="pa-4">
@@ -1344,17 +1355,19 @@ watch(dynamicLogLevels, (newLevels) => {
   opacity: 0;
 }
 
-/* Responsive adjustments */
-@media (max-width: 960px) {
-  .v-col-3 {
-    flex: 0 0 100%;
-    max-width: 100%;
-  }
-  
-  .v-col-9,
-  .v-col-12 {
-    flex: 0 0 100%;
-    max-width: 100%;
-  }
+.resizer {
+  width: 4px;
+  cursor: col-resize;
+  background: #e0e0e0;
+  transition: background 0.2s;
+  flex-shrink: 0;
 }
+.resizer:hover,
+.resizer.is-resizing {
+  background: #1976d2;
+}
+.resizer:hover {
+  width: 6px;
+}
+
 </style>
