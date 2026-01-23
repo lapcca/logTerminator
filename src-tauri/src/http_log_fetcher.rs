@@ -256,13 +256,16 @@ pub fn fetch_logs_from_http(
             continue;
         }
 
+        // Save the total entries count before moving all_entries
+        let total_entries = all_entries.len();
+
         // Create test session
         let test_session = crate::log_parser::TestSession {
             id: session_id.clone(),
             name: session_key.clone(),
             directory_path: url.clone(),
             file_count: log_files.len(),
-            total_entries: all_entries.len(),
+            total_entries,
             created_at: Some(Utc::now()),
             last_parsed_at: Some(Utc::now()),
             source_type: Some("http".to_string()),
@@ -272,17 +275,44 @@ pub fn fetch_logs_from_http(
             .create_test_session(&test_session)
             .map_err(|e| HttpFetchError::ParseError(format!("Failed to create session: {}", e)))?;
 
-        db_manager
+        let inserted_ids = db_manager
             .insert_entries(&all_entries)
             .map_err(|e| HttpFetchError::ParseError(format!("Failed to insert entries: {}", e)))?;
+
+        // Assign IDs to entries for auto-bookmark detection
+        let mut entries_with_ids = all_entries;
+        for (i, entry_id) in inserted_ids.iter().enumerate() {
+            if i < entries_with_ids.len() {
+                entries_with_ids[i].id = Some(*entry_id);
+            }
+        }
+
+        // Find and create auto-bookmarks for ###MARKER### patterns
+        use crate::bookmark_utils::{create_auto_bookmark, find_auto_bookmark_markers};
+        let auto_markers = find_auto_bookmark_markers(&entries_with_ids);
+        if !auto_markers.is_empty() {
+            println!("Found {} auto-bookmark markers", auto_markers.len());
+            for (entry_id, title) in &auto_markers {
+                let bookmark = create_auto_bookmark(*entry_id, title.clone());
+                match db_manager.add_bookmark(&bookmark) {
+                    Ok(_) => {
+                        println!("Created auto-bookmark: '{}'", title);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to create auto-bookmark '{}': {}", title, e);
+                    }
+                }
+            }
+        }
 
         session_ids.push(session_id);
 
         println!(
-            "Completed session {}: {} files, {} entries",
+            "Completed session {}: {} files, {} entries, {} auto-bookmarks",
             session_key,
             log_files.len(),
-            all_entries.len()
+            total_entries,
+            auto_markers.len()
         );
     }
 
