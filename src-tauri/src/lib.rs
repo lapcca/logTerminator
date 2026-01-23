@@ -1,7 +1,9 @@
+mod bookmark_utils;
 mod database;
 pub mod http_log_fetcher;
 pub mod log_parser;
 
+use crate::bookmark_utils::{create_auto_bookmark, find_auto_bookmark_markers};
 use crate::database::DatabaseManager;
 use crate::log_parser::{Bookmark, HtmlLogParser, LogEntry, TestSession};
 use std::sync::Mutex;
@@ -87,15 +89,41 @@ fn parse_directory_blocking(
             .create_test_session(&session)
             .map_err(|e| format!("Failed to create session: {}", e))?;
 
-        db_manager
+        let inserted_ids = db_manager
             .insert_entries(&all_entries)
             .map_err(|e| format!("Failed to insert entries: {}", e))?;
 
+        // Assign IDs to entries for auto-bookmark detection
+        let mut entries_with_ids = all_entries;
+        for (i, entry_id) in inserted_ids.iter().enumerate() {
+            if i < entries_with_ids.len() {
+                entries_with_ids[i].id = Some(*entry_id);
+            }
+        }
+
+        // Find and create auto-bookmarks for ###MARKER### patterns
+        let auto_markers = find_auto_bookmark_markers(&entries_with_ids);
+        if !auto_markers.is_empty() {
+            println!("[BLOCKING] Found {} auto-bookmark markers", auto_markers.len());
+            for (entry_id, title) in &auto_markers {
+                let bookmark = create_auto_bookmark(*entry_id, title.clone());
+                match db_manager.add_bookmark(&bookmark) {
+                    Ok(_) => {
+                        println!("[BLOCKING] Created auto-bookmark: '{}'", title);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to create auto-bookmark '{}': {}", title, e);
+                    }
+                }
+            }
+        }
+
         println!(
-            "[BLOCKING] Completed test {}: {} files, {} entries",
+            "[BLOCKING] Completed test {}: {} files, {} entries, {} auto-bookmarks",
             test_name,
             html_files.len(),
-            total_entries
+            total_entries,
+            auto_markers.len()
         );
 
         session_results.push((session_id, test_name, html_files.len(), total_entries));

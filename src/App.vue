@@ -30,6 +30,7 @@ import {
   MoreFilled,
   InfoFilled
 } from '@element-plus/icons-vue'
+import { parsePythonStackTrace, getStackPreview, isPythonStackTrace } from './utils/stackParser.js'
 
 // Reactive data
 const currentSession = ref('')
@@ -510,6 +511,25 @@ async function addBookmarksForSelected() {
 // Clear selection
 function clearSelection() {
   selectedEntryIds.value = []
+}
+
+// Parse stack trace for display
+function parseStack(stackRaw) {
+  if (!stackRaw) return []
+  return parsePythonStackTrace(stackRaw)
+}
+
+// Check if stack is Python format
+function isPythonStack(stackRaw) {
+  return isPythonStackTrace(stackRaw)
+}
+
+// Extract file name from full path
+function getFileName(filePath) {
+  if (!filePath) return ''
+  // Handle both Unix (/) and Windows (\) path separators
+  const parts = filePath.split(/[\/\\]/)
+  return parts[parts.length - 1] || filePath
 }
 
 // Format stack trace for display (convert newlines to spaces)
@@ -1061,22 +1081,50 @@ function getTableRowClassName({ row }) {
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="stack" label="调用栈" width="250">
+                <el-table-column prop="stack" label="调用栈" width="280">
                   <template #default="{ row }">
                     <el-tooltip
                       v-if="row.stack"
                       placement="top"
                       :show-after="200"
-                      :hide-after="300"
+                      :hide-after="500"
                       effect="light"
-                      popper-class="stack-tooltip">
+                      popper-class="stack-tooltip-large"
+                      :offset="10"
+                      raw-content>
                       <template #content>
                         <div class="tooltip-content">
                           <div class="tooltip-header">
                             <el-icon><MoreFilled /></el-icon>
                             Stack Trace
                           </div>
-                          <div class="tooltip-text">{{ row.stack }}</div>
+                          <!-- Python stack trace with tabs -->
+                          <template v-if="isPythonStack(row.stack)">
+                            <el-tabs model-value="parsed" class="stack-tabs">
+                              <el-tab-pane label="解析表格" name="parsed">
+                                <el-table
+                                  :data="parseStack(row.stack)"
+                                  size="small"
+                                  :header-cell-style="{ background: '#f5f7fa', color: '#606266', fontWeight: '600' }"
+                                  class="tooltip-stack-table"
+                                  max-height="300">
+                                  <el-table-column label="文件" min-width="150">
+                                    <template #default="{ row: stackRow }">
+                                      <span :title="stackRow.file">{{ getFileName(stackRow.file) }}</span>
+                                    </template>
+                                  </el-table-column>
+                                  <el-table-column prop="line" label="行号" width="60" align="center" />
+                                  <el-table-column prop="function" label="函数" min-width="120" show-overflow-tooltip />
+                                  <el-table-column prop="code" label="代码" min-width="180" show-overflow-tooltip />
+                                </el-table>
+                              </el-tab-pane>
+                              <el-tab-pane label="原始栈" name="raw">
+                                <div class="tooltip-text">{{ row.stack }}</div>
+                              </el-tab-pane>
+                            </el-tabs>
+                          </template>
+                          <!-- Non-Python stack trace: show raw text only -->
+                          <div v-else class="tooltip-text">{{ row.stack }}</div>
                         </div>
                       </template>
                       <span class="stack-cell">{{ formatStack(row.stack) }}</span>
@@ -1163,7 +1211,7 @@ function getTableRowClassName({ row }) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 28px;
   height: 64px;
 }
 
@@ -1594,5 +1642,48 @@ function getTableRowClassName({ row }) {
 /* Monospace font for timestamps */
 :deep(.el-table__body-wrapper .el-table__row td:first-child) {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+/* Large Tooltip for Stack Trace */
+:deep(.stack-tooltip-large) {
+  max-width: 800px !important;
+}
+
+/* Stack Tabs in Tooltip */
+.stack-tabs {
+  margin-top: 8px;
+}
+
+.stack-tabs :deep(.el-tabs__header) {
+  margin: 0 0 8px 0;
+}
+
+.stack-tabs :deep(.el-tabs__item) {
+  font-size: 13px;
+  padding: 0 16px;
+}
+
+.stack-tabs :deep(.el-tabs__content) {
+  padding: 0;
+}
+
+.tooltip-stack-table {
+  font-size: 12px;
+}
+
+.tooltip-stack-table :deep(.el-table__header th) {
+  padding: 6px 0;
+  font-size: 12px;
+  background: #f5f7fa !important;
+}
+
+.tooltip-stack-table :deep(.el-table__body td) {
+  padding: 4px 0;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+}
+
+.tooltip-stack-table :deep(.el-table__body tr:hover > td) {
+  background-color: #f5f7fa !important;
 }
 </style>

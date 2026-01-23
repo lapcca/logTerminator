@@ -2193,6 +2193,7 @@ name = "logterminator"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "regex",
  "reqwest",
  "rusqlite",
  "scraper",

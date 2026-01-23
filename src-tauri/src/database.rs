@@ -102,8 +102,10 @@ impl DatabaseManager {
         Ok(session.id.clone())
     }
 
-    pub fn insert_entries(&mut self, entries: &[LogEntry]) -> SqlResult<()> {
+    pub fn insert_entries(&mut self, entries: &[LogEntry]) -> SqlResult<Vec<i64>> {
         let tx = self.conn.transaction()?;
+
+        let mut inserted_ids = Vec::new();
 
         {
             let mut stmt = tx.prepare(
@@ -123,11 +125,14 @@ impl DatabaseManager {
                     &entry.message,
                     &entry.line_number
                 ])?;
+
+                // Get the last inserted row ID from the transaction
+                inserted_ids.push(tx.last_insert_rowid());
             }
         }
 
         tx.commit()?;
-        Ok(())
+        Ok(inserted_ids)
     }
 
     pub fn get_entries_paginated(
