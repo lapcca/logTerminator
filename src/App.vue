@@ -132,6 +132,12 @@ async function openDirectory() {
   httpUrl.value = ''
 }
 
+// Handle session change from selector
+function onSessionChange() {
+  levelFilter.value = 'ALL'
+  refreshLogs()
+}
+
 // Select local folder
 async function selectLocalFolder() {
   try {
@@ -692,7 +698,37 @@ watch(dynamicLogLevels, (newLevels) => {
       
       <v-icon class="mr-2" size="28">mdi-file-document-multiple-outline</v-icon>
       <span class="text-h6 font-weight-medium">日志查看器</span>
-      
+
+      <!-- Session Selector -->
+      <v-select
+        v-model="currentSession"
+        :items="sessions"
+        item-title="name"
+        item-value="id"
+        prepend-inner-icon="mdi-folder-multiple"
+        density="comfortable"
+        variant="solo"
+        flat
+        hide-details
+        style="max-width: 300px; margin-left: 20px"
+        @update:model-value="onSessionChange">
+        <template v-slot:selection="{ item }">
+          <v-icon :color="currentSession === item.id ? 'primary' : 'grey'" size="small" class="mr-2">
+            {{ item.raw.source_type === 'http' ? 'mdi-web' : 'mdi-folder' }}
+          </v-icon>
+          <span class="text-truncate">{{ item.name }}</span>
+        </template>
+        <template v-slot:item="{ props, item }">
+          <v-list-item v-bind="props">
+            <template v-slot:prepend>
+              <v-icon size="small">{{ item.raw.source_type === 'http' ? 'mdi-web' : 'mdi-folder' }}</v-icon>
+            </template>
+            <v-list-item-title>{{ item.raw.name }}</v-list-item-title>
+            <v-list-item-subtitle>{{ item.raw.total_entries }} 条记录</v-list-item-subtitle>
+          </v-list-item>
+        </template>
+      </v-select>
+
       <v-spacer></v-spacer>
       
       <!-- Loading indicator -->
