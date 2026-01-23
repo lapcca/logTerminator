@@ -1,16 +1,15 @@
-import { createApp } from "vue";
+import { createApp } from 'vue'
+import ElementPlus from 'element-plus'
+import 'element-plus/dist/index.css'
+import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+import App from './App.vue'
 
-// Vuetify
-import 'vuetify/styles'
-import { createVuetify } from 'vuetify'
-import * as components from 'vuetify/components'
-import * as directives from 'vuetify/directives'
+const app = createApp(App)
 
+// Register all Element Plus icons
+for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+  app.component(key, component)
+}
 
-import App from "./App.vue";
-
-const vuetify = createVuetify({
-    components,
-    directives,
-  })
-createApp(App).use(vuetify).mount("#app");
+app.use(ElementPlus)
+app.mount('#app')
