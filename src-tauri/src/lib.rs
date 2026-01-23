@@ -1,4 +1,4 @@
-mod bookmark_utils;
+pub mod bookmark_utils;
 mod database;
 pub mod http_log_fetcher;
 pub mod log_parser;
