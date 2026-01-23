@@ -806,86 +806,87 @@ watch(sidebarWidth, (newWidth) => {
         <v-row>
           <!-- Left Sidebar -->
           <v-expand-x-transition>
-            <v-col v-if="showSidebar" :style="{ width: sidebarWidth + 'px', flexShrink: 0 }" class="pr-4">
-              <!-- Bookmarks Panel -->
-            <v-card class="mb-3" elevation="2">
-              <v-card-title class="d-flex align-center py-2 px-4 bg-amber-lighten-5">
-                <v-btn
-                  icon
-                  variant="text"
-                  size="small"
-                  @click="showBookmarksPanel = !showBookmarksPanel"
-                  :title="showBookmarksPanel ? '收起书签面板' : '展开书签面板'"
-                  class="mr-1">
-                  <v-icon :class="{ 'rotate-180': !showBookmarksPanel }" size="20">
-                    mdi-chevron-down
-                  </v-icon>
-                </v-btn>
-                <v-icon color="amber-darken-2" class="mr-2">mdi-bookmark-multiple</v-icon>
-                <span class="font-weight-medium">书签</span>
-                <v-chip size="small" color="amber" variant="flat" class="ml-2">
-                  {{ bookmarks.length }}
-                </v-chip>
-              </v-card-title>
-              <v-expand-transition>
-                <div v-show="showBookmarksPanel">
-                  <v-divider></v-divider>
-                  <v-card-text class="pa-0" style="max-height: 300px; overflow-y: auto;">
-                    <v-list v-if="bookmarks.length > 0" density="comfortable">
-                      <v-list-item
-                        v-for="bookmark in bookmarks"
-                        :key="bookmark[0]?.id"
-                        @click="jumpToBookmark(bookmark)"
-                        class="bookmark-item px-3"
-                        rounded="sm">
-                        <template v-slot:prepend>
-                          <v-avatar color="amber-lighten-3" size="32" class="mr-3">
-                            <v-icon color="amber-darken-2" size="small">mdi-bookmark</v-icon>
-                          </v-avatar>
-                        </template>
-                        <v-list-item-title class="text-body-2 font-weight-medium">
-                          {{ bookmark[0]?.title || '书签' }}
-                        </v-list-item-title>
-                        <template v-slot:append>
-                          <v-btn
-                            icon
-                            variant="text"
-                            size="small"
-                            color="grey"
-                            @click.stop="showEditBookmarkTitleDialog(bookmark)"
-                            title="编辑书签名称">
-                            <v-icon size="small">mdi-pencil</v-icon>
-                          </v-btn>
-                          <v-btn
-                            icon
-                            variant="text"
-                            size="small"
-                            color="grey"
-                            @click.stop="removeBookmarkById(bookmark[0]?.id)"
-                            title="删除书签">
-                            <v-icon size="small">mdi-close</v-icon>
-                          </v-btn>
-                        </template>
-                      </v-list-item>
-                    </v-list>
-                    <div v-else class="pa-6 text-center text-grey">
-                      <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-bookmark-outline</v-icon>
-                      <div class="text-body-2">暂无书签</div>
-                      <div class="text-caption">点击日志条目旁的星号添加书签</div>
-                    </div>
-                  </v-card-text>
-                </div>
-              </v-expand-transition>
-            </v-card>
-          </v-col>
+            <div v-if="showSidebar" style="display: flex; flex-shrink: 0;">
+              <v-col :style="{ width: sidebarWidth + 'px', flexShrink: 0 }" class="pr-4">
+                <!-- Bookmarks Panel -->
+              <v-card class="mb-3" elevation="2">
+                <v-card-title class="d-flex align-center py-2 px-4 bg-amber-lighten-5">
+                  <v-btn
+                    icon
+                    variant="text"
+                    size="small"
+                    @click="showBookmarksPanel = !showBookmarksPanel"
+                    :title="showBookmarksPanel ? '收起书签面板' : '展开书签面板'"
+                    class="mr-1">
+                    <v-icon :class="{ 'rotate-180': !showBookmarksPanel }" size="20">
+                      mdi-chevron-down
+                    </v-icon>
+                  </v-btn>
+                  <v-icon color="amber-darken-2" class="mr-2">mdi-bookmark-multiple</v-icon>
+                  <span class="font-weight-medium">书签</span>
+                  <v-chip size="small" color="amber" variant="flat" class="ml-2">
+                    {{ bookmarks.length }}
+                  </v-chip>
+                </v-card-title>
+                <v-expand-transition>
+                  <div v-show="showBookmarksPanel">
+                    <v-divider></v-divider>
+                    <v-card-text class="pa-0" style="max-height: 300px; overflow-y: auto;">
+                      <v-list v-if="bookmarks.length > 0" density="comfortable">
+                        <v-list-item
+                          v-for="bookmark in bookmarks"
+                          :key="bookmark[0]?.id"
+                          @click="jumpToBookmark(bookmark)"
+                          class="bookmark-item px-3"
+                          rounded="sm">
+                          <template v-slot:prepend>
+                            <v-avatar color="amber-lighten-3" size="32" class="mr-3">
+                              <v-icon color="amber-darken-2" size="small">mdi-bookmark</v-icon>
+                            </v-avatar>
+                          </template>
+                          <v-list-item-title class="text-body-2 font-weight-medium">
+                            {{ bookmark[0]?.title || '书签' }}
+                          </v-list-item-title>
+                          <template v-slot:append>
+                            <v-btn
+                              icon
+                              variant="text"
+                              size="small"
+                              color="grey"
+                              @click.stop="showEditBookmarkTitleDialog(bookmark)"
+                              title="编辑书签名称">
+                              <v-icon size="small">mdi-pencil</v-icon>
+                            </v-btn>
+                            <v-btn
+                              icon
+                              variant="text"
+                              size="small"
+                              color="grey"
+                              @click.stop="removeBookmarkById(bookmark[0]?.id)"
+                              title="删除书签">
+                              <v-icon size="small">mdi-close</v-icon>
+                            </v-btn>
+                          </template>
+                        </v-list-item>
+                      </v-list>
+                      <div v-else class="pa-6 text-center text-grey">
+                        <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-bookmark-outline</v-icon>
+                        <div class="text-body-2">暂无书签</div>
+                        <div class="text-caption">点击日志条目旁的星号添加书签</div>
+                      </div>
+                    </v-card-text>
+                  </div>
+                </v-expand-transition>
+              </v-card>
+              </v-col>
 
-          <!-- Resizer -->
-          <div
-            v-show="showSidebar"
-            class="resizer"
-            :class="{ 'is-resizing': isResizing }"
-            @mousedown="startResize">
-          </div>
+              <!-- Resizer -->
+              <div
+                class="resizer"
+                :class="{ 'is-resizing': isResizing }"
+                @mousedown="startResize">
+              </div>
+            </div>
           </v-expand-x-transition>
 
           <!-- Main Content -->
