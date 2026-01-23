@@ -1370,17 +1370,4 @@ watch(sidebarWidth, (newWidth) => {
   width: 6px;
 }
 
-/* Responsive adjustments */
-@media (max-width: 960px) {
-  .v-col-3 {
-    flex: 0 0 100%;
-    max-width: 100%;
-  }
-
-  .v-col-9,
-  .v-col-12 {
-    flex: 0 0 100%;
-    max-width: 100%;
-  }
-}
 </style>
