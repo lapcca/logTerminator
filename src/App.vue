@@ -30,6 +30,7 @@ import {
   MoreFilled,
   InfoFilled
 } from '@element-plus/icons-vue'
+import MessageTooltip from './components/MessageTooltip.vue'
 
 // Reactive data
 const currentSession = ref('')
@@ -649,6 +650,12 @@ async function jumpToBookmark(bookmark) {
   }
 }
 
+// Handle JSON detected in message
+function handleJsonDetected(entryId, data) {
+  console.log('JSON detected in entry', entryId, ':', data)
+  // Can be used for statistics or future features
+}
+
 // Highlight and scroll to entry
 function highlightAndScroll(entryId) {
   highlightedEntryId.value = entryId
@@ -1084,24 +1091,16 @@ function getTableRowClassName({ row }) {
                     <span v-else class="stack-cell">-</span>
                   </template>
                 </el-table-column>
-                <el-table-column prop="message" label="消息" min-width="300">
+                <el-table-column
+                  prop="message"
+                  label="消息"
+                  min-width="300">
                   <template #default="{ row }">
-                    <el-tooltip
-                      placement="bottom"
-                      :show-after="200"
-                      effect="light"
-                      popper-class="message-tooltip">
-                      <template #content>
-                        <div class="tooltip-content">
-                          <div class="tooltip-header">
-                            <el-icon><InfoFilled /></el-icon>
-                            Message
-                          </div>
-                          <div class="tooltip-text">{{ row.message }}</div>
-                        </div>
-                      </template>
-                      <div class="message-cell">{{ row.message }}</div>
-                    </el-tooltip>
+                    <MessageTooltip
+                      :message="row.message"
+                      :useDialogForLargeJson="true"
+                      :largeJsonThreshold="2"
+                      @json-detected="(data) => handleJsonDetected(row.id, data)" />
                   </template>
                 </el-table-column>
                 <el-table-column label="书签" width="80" align="center">
