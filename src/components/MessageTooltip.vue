@@ -316,4 +316,32 @@ watch(viewMode, (newMode) => {
   color: #409EFF;
   font-size: 12px;
 }
+
+/* Collapsible JSON sections */
+.json-array,
+.json-object {
+  position: relative;
+}
+
+.json-toggle {
+  position: absolute;
+  left: -20px;
+  cursor: pointer;
+  user-select: none;
+  color: #409EFF;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.json-toggle:hover {
+  color: #66b1ff;
+}
+
+.json-item {
+  margin-left: 20px;
+}
+
+.json-item[data-collapsed="true"] {
+  display: none;
+}
 </style>

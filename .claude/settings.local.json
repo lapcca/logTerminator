@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Skill(auto_build_after_fix)",
-      "Bash(pnpm tauri build:*)"
+      "Bash(pnpm tauri build:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)",
+      "Bash(pnpm build)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
