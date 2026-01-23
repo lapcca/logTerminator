@@ -76,24 +76,41 @@ impl HttpLogFetcher {
         let base = Url::parse(base_url)
             .map_err(|e| HttpFetchError::InvalidUrl(format!("{}: {}", base_url, e)))?;
 
+        // Get the base path for filtering - ensure it ends with / for proper prefix matching
+        let base_path = base.path().trim_end_matches('/');
+        let base_path_prefix = format!("{}{}", base_path, "/");
+
         let mut urls = Vec::new();
 
         for element in document.select(&link_selector) {
             if let Some(href) = element.value().attr("href") {
-                // Skip parent directory links
-                if href == "../" || href.starts_with("?") {
+                // Skip parent directory links explicitly
+                if href == "../" || href.starts_with("../") || href.starts_with("?") {
+                    eprintln!("Debug: Skipping parent/query link: {}", href);
                     continue;
                 }
 
                 // Skip directory links (ending with /)
                 if href.ends_with('/') {
+                    eprintln!("Debug: Skipping directory link: {}", href);
                     continue;
                 }
 
                 // Resolve relative URLs against base
                 match base.join(href) {
                     Ok(full_url) => {
-                        urls.push(full_url.to_string());
+                        let url_string = full_url.to_string();
+                        let resolved_path = full_url.path();
+
+                        // Check if resolved path is within the base path
+                        // The resolved path must start with base_path_prefix
+                        if resolved_path.starts_with(&base_path_prefix) {
+                            urls.push(url_string);
+                        } else {
+                            eprintln!("Warning: Skipping URL outside target directory:");
+                            eprintln!("  Base path: {}", base_path_prefix);
+                            eprintln!("  Resolved: {} (path: {})", url_string, resolved_path);
+                        }
                     }
                     Err(e) => {
                         eprintln!("Warning: Could not resolve URL '{}': {}", href, e);
