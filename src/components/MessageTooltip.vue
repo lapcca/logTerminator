@@ -45,6 +45,20 @@
         </div>
       </div>
 
+      <!-- Search bar (for JSON view) -->
+      <div v-if="viewMode === 'json' && hasJson" class="search-bar">
+        <el-input
+          v-model="searchTerm"
+          placeholder="Search keys/values..."
+          size="small"
+          clearable
+          @input="handleSearch">
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+      </div>
+
       <!-- Content area -->
       <div class="tooltip-body">
         <!-- Raw view -->
@@ -57,7 +71,12 @@
           <div v-if="jsonError" class="json-error">
             Invalid JSON: {{ jsonError }}
           </div>
-          <div v-else class="json-content" v-html="highlightedJson"></div>
+          <div v-else class="json-content">
+            <div v-if="searchResults.length > 0" class="search-results-info">
+              Found {{ searchResults.length }} match(es)
+            </div>
+            <div v-html="highlightedJson"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -67,7 +86,8 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { detectJson, syntaxHighlightJson, prettifyJson, getJsonSize } from '../utils/jsonViewer.js'
+import { Search } from '@element-plus/icons-vue'
+import { detectJson, syntaxHighlightJson, prettifyJson, getJsonSize, searchInJson } from '../utils/jsonViewer.js'
 
 const props = defineProps({
   message: {
@@ -92,6 +112,8 @@ const hasJson = ref(false)
 const parsedJson = ref(null)
 const jsonError = ref(null)
 const highlightedJson = ref('')
+const searchTerm = ref('')
+const searchResults = ref([])
 
 // Computed
 const popoverWidth = computed(() => {
@@ -185,6 +207,15 @@ async function copyJson() {
   }
 }
 
+function handleSearch() {
+  if (!searchTerm.value || !parsedJson.value) {
+    searchResults.value = []
+    return
+  }
+
+  searchResults.value = searchInJson(parsedJson.value, searchTerm.value)
+}
+
 // Lifecycle
 watch(() => props.message, () => {
   detectJsonInMessage()
@@ -272,5 +303,17 @@ watch(viewMode, (newMode) => {
 
 .json-content > div:first-child {
   margin-left: 0;
+}
+
+.search-bar {
+  padding: 8px 12px;
+  border-bottom: 1px solid #dcdfe6;
+}
+
+.search-results-info {
+  padding: 8px 12px;
+  background-color: #e6f7ff;
+  color: #409EFF;
+  font-size: 12px;
 }
 </style>
