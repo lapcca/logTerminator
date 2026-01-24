@@ -1370,7 +1370,6 @@ function getTableRowClassName({ row }) {
                     v-model="levelFilter"
                     placeholder="日志级别"
                     multiple
-                    clearable
                     style="width: 100%"
                     @visible-change="handleLevelSelectVisibleChange">
                     <template #header>
