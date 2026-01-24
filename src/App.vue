@@ -1581,8 +1581,7 @@ function getTableRowClassName({ row }) {
 
 .level-filter-select {
   /* Calculate width: 100% minus all fixed-width elements in header-left */
-  width: calc(100% - 830px);
-  max-width: 100%;
+  width: calc(100% - 870px);
   min-width: 200px;
   box-sizing: border-box;
 }
@@ -1590,7 +1589,7 @@ function getTableRowClassName({ row }) {
 /* When sidebar is hidden, adjust log level position */
 .sidebar-collapsed .level-filter-select {
   /* When sidebar is collapsed, left elements take less space */
-  width: calc(100% - 260px);
+  width: calc(100% - 300px);
 }
 
 .header-right {
