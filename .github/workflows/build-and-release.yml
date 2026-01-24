@@ -95,11 +95,24 @@ jobs:
           mkdir -p ./upload
 
           # Copy NSIS installer (setup file)
-          if [ -f "src-tauri/target/${{ matrix.platform.target }}/release/bundle/nsis/logTerminator_*.nsis.exe" ]; then
-            cp -f src-tauri/target/${{ matrix.platform.target }}/release/bundle/nsis/*.exe ./upload/
+          # On Windows, default target builds go to target/release, not target/<triple>/release
+          if [ "${{ matrix.platform.os }}" == "windows-latest" ]; then
+            BASE_PATH="src-tauri/target/release"
+          else
+            BASE_PATH="src-tauri/target/${{ matrix.platform.target }}/release"
+          fi
+
+          # Find and copy NSIS installer
+          if [ -d "$BASE_PATH/bundle/nsis" ]; then
+            cp -f $BASE_PATH/bundle/nsis/*.exe ./upload/ 2>/dev/null || echo "No NSIS installer found"
           fi
 
           # Copy portable executable
+          if [ -f "$BASE_PATH/logterminator.exe" ]; then
+            cp -f $BASE_PATH/logterminator.exe ./upload/
+          fi
+
+          # Also check target/<triple>/release path for cross-compilation scenarios
           if [ -f "src-tauri/target/${{ matrix.platform.target }}/release/logterminator.exe" ]; then
             cp -f src-tauri/target/${{ matrix.platform.target }}/release/logterminator.exe ./upload/
           fi
