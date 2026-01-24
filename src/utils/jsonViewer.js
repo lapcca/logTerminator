@@ -57,23 +57,23 @@ function extractJsonByBrackets(text, startChar, endChar) {
 
 /**
  * Extract all potential JSON candidates from text
- * Uses improved bracket counting to find complete JSON structures
+ * Prioritizes objects over arrays, and outer structures over nested ones
  * @param {string} text - The text to search
  * @returns {Array<string>} Array of potential JSON strings
  */
 function extractJsonCandidates(text) {
   const candidates = []
 
-  // Extract arrays first (highest priority)
-  const arrayCandidate = extractCompleteStructure(text, '[', ']')
-  if (arrayCandidate) {
-    candidates.push(arrayCandidate)
+  // Extract objects first (higher priority - most JSON logs start with {)
+  const objectCandidate = extractCompleteStructure(text, '{', '}')
+  if (objectCandidate) {
+    candidates.push(objectCandidate)
   }
 
-  // Extract objects (lower priority, only if different from array)
-  const objectCandidate = extractCompleteStructure(text, '{', '}')
-  if (objectCandidate && objectCandidate !== arrayCandidate) {
-    candidates.push(objectCandidate)
+  // Extract arrays as fallback (only if different from object)
+  const arrayCandidate = extractCompleteStructure(text, '[', ']')
+  if (arrayCandidate && arrayCandidate !== objectCandidate) {
+    candidates.push(arrayCandidate)
   }
 
   return candidates
