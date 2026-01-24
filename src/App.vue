@@ -1528,7 +1528,7 @@ function getTableRowClassName({ row }) {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
   padding: 0 28px;
   height: 64px;
   position: relative;
@@ -1538,8 +1538,8 @@ function getTableRowClassName({ row }) {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 1;
-  min-width: 0; /* Allow flex items to shrink below content size */
+  flex: 0 1 auto; /* Don't force it to expand, but can grow if needed */
+  min-width: 0;
 }
 
 .sidebar-toggle {
@@ -1582,7 +1582,7 @@ function getTableRowClassName({ row }) {
 }
 
 .level-filter-select {
-  flex: 1;
+  flex: 1 1 400px; /* Can grow, but with a basis of 400px */
   min-width: 200px;
   max-width: 100%;
   box-sizing: border-box;
