@@ -154,27 +154,33 @@ impl DatabaseManager {
 
         // Handle level filter - support multiple levels
         if let Some(levels) = level_filter {
-            // Skip if empty or contains only "ALL" (no filtering)
-            let filtered_levels: Vec<&String> = levels.iter()
-                .filter(|level| !level.is_empty() && *level != "ALL")
-                .collect();
-
-            if !filtered_levels.is_empty() {
-                // Build OR conditions for multiple levels using IN clause
-                let level_placeholders: Vec<String> = (0..filtered_levels.len() * 2)
-                    .map(|_| "?".to_string())
+            // Empty array means no levels selected - return no results
+            if levels.is_empty() {
+                // Add a condition that never matches
+                where_conditions.push("1 = 0".to_string());
+            } else {
+                // Filter out empty strings and "ALL" (legacy support)
+                let filtered_levels: Vec<&String> = levels.iter()
+                    .filter(|level| !level.is_empty() && *level != "ALL")
                     .collect();
 
-                where_conditions.push(format!("(level IN ({}) OR level IN ({}))",
-                    level_placeholders[..filtered_levels.len()].join(", "),
-                    level_placeholders[filtered_levels.len()..].join(", ")));
+                if !filtered_levels.is_empty() {
+                    // Build OR conditions for multiple levels using IN clause
+                    let level_placeholders: Vec<String> = (0..filtered_levels.len() * 2)
+                        .map(|_| "?".to_string())
+                        .collect();
 
-                // Add parameters for each level (with and without brackets)
-                for level in &filtered_levels {
-                    params.push(Box::new(level.to_string()));
-                }
-                for level in &filtered_levels {
-                    params.push(Box::new(format!("[{}]", level)));
+                    where_conditions.push(format!("(level IN ({}) OR level IN ({}))",
+                        level_placeholders[..filtered_levels.len()].join(", "),
+                        level_placeholders[filtered_levels.len()..].join(", ")));
+
+                    // Add parameters for each level (with and without brackets)
+                    for level in &filtered_levels {
+                        params.push(Box::new(level.to_string()));
+                    }
+                    for level in &filtered_levels {
+                        params.push(Box::new(format!("[{}]", level)));
+                    }
                 }
             }
         }
@@ -359,27 +365,33 @@ impl DatabaseManager {
 
         // Handle level filter - support multiple levels
         if let Some(levels) = level_filter {
-            // Skip if empty or contains only "ALL" (no filtering)
-            let filtered_levels: Vec<&String> = levels.iter()
-                .filter(|level| !level.is_empty() && *level != "ALL")
-                .collect();
-
-            if !filtered_levels.is_empty() {
-                // Build OR conditions for multiple levels using IN clause
-                let level_placeholders: Vec<String> = (0..filtered_levels.len() * 2)
-                    .map(|_| "?".to_string())
+            // Empty array means no levels selected - return no results
+            if levels.is_empty() {
+                // Add a condition that never matches
+                where_conditions.push("1 = 0".to_string());
+            } else {
+                // Filter out empty strings and "ALL" (legacy support)
+                let filtered_levels: Vec<&String> = levels.iter()
+                    .filter(|level| !level.is_empty() && *level != "ALL")
                     .collect();
 
-                where_conditions.push(format!("(level IN ({}) OR level IN ({}))",
-                    level_placeholders[..filtered_levels.len()].join(", "),
-                    level_placeholders[filtered_levels.len()..].join(", ")));
+                if !filtered_levels.is_empty() {
+                    // Build OR conditions for multiple levels using IN clause
+                    let level_placeholders: Vec<String> = (0..filtered_levels.len() * 2)
+                        .map(|_| "?".to_string())
+                        .collect();
 
-                // Add parameters for each level (with and without brackets)
-                for level in &filtered_levels {
-                    params.push(Box::new(level.to_string()));
-                }
-                for level in &filtered_levels {
-                    params.push(Box::new(format!("[{}]", level)));
+                    where_conditions.push(format!("(level IN ({}) OR level IN ({}))",
+                        level_placeholders[..filtered_levels.len()].join(", "),
+                        level_placeholders[filtered_levels.len()..].join(", ")));
+
+                    // Add parameters for each level (with and without brackets)
+                    for level in &filtered_levels {
+                        params.push(Box::new(level.to_string()));
+                    }
+                    for level in &filtered_levels {
+                        params.push(Box::new(format!("[{}]", level)));
+                    }
                 }
             }
         }
