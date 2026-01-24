@@ -179,8 +179,9 @@ const bookmarks = ref([])
 const loading = ref(false)
 const loadingMessage = ref('') // 显示加载状态信息
 const searchTerm = ref('')
-const levelFilter = ref(['ALL']) // Changed to array for multi-select
+const levelFilter = ref([]) // Multi-select for log levels
 const sessionLogLevels = ref([]) // Store all log levels for the current session
+const selectAllLevels = ref(false) // Track select all checkbox state
 const totalEntries = ref(0)
 const sessions = ref([])
 const showSidebar = ref(true) // 控制左侧面板显示/隐藏
@@ -247,19 +248,17 @@ const levelPriority = {
   'TRACE': 1
 }
 
-// Computed property for sorted log levels (with ALL at the beginning)
+// Computed property for sorted log levels
 const sortedLogLevels = computed(() => {
   if (sessionLogLevels.value.length === 0) {
-    return ['ALL']
+    return []
   }
   // Sort by priority (higher priority first)
-  const sortedLevels = [...sessionLogLevels.value].sort((a, b) => {
+  return [...sessionLogLevels.value].sort((a, b) => {
     const priorityA = levelPriority[a] || 0
     const priorityB = levelPriority[b] || 0
     return priorityB - priorityA
   })
-  // Add ALL option at the beginning
-  return ['ALL', ...sortedLevels]
 })
 
 // Table headers
@@ -303,11 +302,15 @@ async function openDirectory() {
 async function fetchSessionLogLevels() {
   if (!currentSession.value) {
     sessionLogLevels.value = []
+    levelFilter.value = []
     return
   }
 
   try {
     sessionLogLevels.value = await invoke('get_session_log_levels', { sessionId: currentSession.value })
+    // Default to selecting all levels
+    levelFilter.value = [...sessionLogLevels.value]
+    selectAllLevels.value = true
   } catch (error) {
     console.error('Error fetching session log levels:', error)
     sessionLogLevels.value = []
@@ -316,9 +319,19 @@ async function fetchSessionLogLevels() {
 
 // Handle session change from selector
 async function onSessionChange() {
-  levelFilter.value = ['ALL'] // Reset to array with ALL
   await fetchSessionLogLevels() // Fetch all log levels for this session
   refreshLogs()
+}
+
+// Toggle all log levels selection
+function toggleAllLevels() {
+  if (selectAllLevels.value) {
+    // Select all levels
+    levelFilter.value = [...sessionLogLevels.value]
+  } else {
+    // Clear selection
+    levelFilter.value = []
+  }
 }
 
 // Start dragging the resizer
@@ -1028,34 +1041,18 @@ watch(currentSession, async (newSessionId) => {
   }
 })
 
-// Watch sortedLogLevels and reset levelFilter if current selection is not available
-watch(sortedLogLevels, (newLevels) => {
-  // For multi-select: if ALL is selected or any selected level is not available, reset to ALL
-  const hasAll = levelFilter.value.includes('ALL')
-  const hasInvalid = levelFilter.value.some(level => level !== 'ALL' && !newLevels.includes(level))
-  if (hasInvalid) {
-    levelFilter.value = ['ALL']
-  }
-})
-
-// Watch levelFilter for changes and handle multi-select logic
+// Watch levelFilter for changes and sync selectAllLevels state
 watch(levelFilter, (newValues, oldValues) => {
   // Avoid infinite loop - only process if actually changed
   if (JSON.stringify(newValues) === JSON.stringify(oldValues)) {
     return
   }
 
-  // If nothing is selected, default to ALL
-  if (newValues.length === 0) {
-    levelFilter.value = ['ALL']
-    return
-  }
-
-  // If ALL is selected with any other option, remove ALL (keep other selections)
-  if (newValues.includes('ALL') && newValues.length > 1) {
-    const filtered = newValues.filter(v => v !== 'ALL')
-    levelFilter.value = filtered
-    return
+  // Sync select all checkbox state
+  if (newValues.length === sessionLogLevels.value.length) {
+    selectAllLevels.value = true
+  } else {
+    selectAllLevels.value = false
   }
 
   // Refresh logs when filter changes
@@ -1376,6 +1373,15 @@ function getTableRowClassName({ row }) {
                     clearable
                     style="width: 100%"
                     @visible-change="handleLevelSelectVisibleChange">
+                    <template #header>
+                      <div style="padding: 8px 12px; border-bottom: 1px solid #ebeef5;">
+                        <el-checkbox
+                          v-model="selectAllLevels"
+                          @change="toggleAllLevels">
+                          全选
+                        </el-checkbox>
+                      </div>
+                    </template>
                     <el-option
                       v-for="level in sortedLogLevels"
                       :key="level"
