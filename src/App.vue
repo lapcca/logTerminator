@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick, h } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -33,6 +33,145 @@ import {
 import MessageTooltip from './components/MessageTooltip.vue'
 import { parsePythonStackTrace, getStackPreview, isPythonStackTrace } from './utils/stackParser.js'
 
+// Custom logTerminator icon component
+const LogTerminatorIcon = {
+  render() {
+    return h('svg', {
+      viewBox: '0 0 32 32',
+      xmlns: 'http://www.w3.org/2000/svg',
+      style: { width: '100%', height: '100%' }
+    }, [
+      // Definitions
+      h('defs', [
+        // Background gradient
+        h('linearGradient', {
+          id: 'bgGrad',
+          x1: '0%',
+          y1: '0%',
+          x2: '100%',
+          y2: '100%'
+        }, [
+          h('stop', { offset: '0%', 'stop-color': '#667eea' }),
+          h('stop', { offset: '50%', 'stop-color': '#764ba2' }),
+          h('stop', { offset: '100%', 'stop-color': '#f093fb' })
+        ]),
+        // Document gradient
+        h('linearGradient', {
+          id: 'docGrad',
+          x1: '0%',
+          y1: '0%',
+          x2: '100%',
+          y2: '100%'
+        }, [
+          h('stop', { offset: '0%', 'stop-color': '#ffffff', 'stop-opacity': '0.95' }),
+          h('stop', { offset: '100%', 'stop-color': '#f0f0f5', 'stop-opacity': '0.95' })
+        ]),
+        // Accent gradient
+        h('linearGradient', {
+          id: 'accentGrad',
+          x1: '0%',
+          y1: '0%',
+          x2: '100%',
+          y2: '0%'
+        }, [
+          h('stop', { offset: '0%', 'stop-color': '#667eea' }),
+          h('stop', { offset: '100%', 'stop-color': '#764ba2' })
+        ])
+      ]),
+      // Background
+      h('rect', {
+        width: '32',
+        height: '32',
+        rx: '7',
+        fill: 'url(#bgGrad)'
+      }),
+      // Inner glow
+      h('ellipse', {
+        cx: '16',
+        cy: '16',
+        rx: '11',
+        ry: '11',
+        fill: 'white',
+        opacity: '0.08'
+      }),
+      // Document
+      h('path', {
+        d: 'M8 5C7.4 5 7 5.4 7 6V22C7 22.6 7.4 23 8 23H20C20.6 23 21 22.6 21 22V9L17 5H8Z',
+        fill: 'url(#docGrad)'
+      }),
+      // Document fold
+      h('path', {
+        d: 'M17 5V9H21',
+        fill: '#e0e0ea',
+        opacity: '0.6'
+      }),
+      // Code lines
+      h('rect', {
+        x: '10',
+        y: '11',
+        width: '8',
+        height: '1.5',
+        rx: '0.75',
+        fill: 'url(#accentGrad)'
+      }),
+      h('rect', {
+        x: '10',
+        y: '13.5',
+        width: '6',
+        height: '1.5',
+        rx: '0.75',
+        fill: 'url(#accentGrad)',
+        opacity: '0.8'
+      }),
+      h('rect', {
+        x: '10',
+        y: '16',
+        width: '7',
+        height: '1.5',
+        rx: '0.75',
+        fill: 'url(#accentGrad)',
+        opacity: '0.9'
+      }),
+      h('rect', {
+        x: '10',
+        y: '18.5',
+        width: '5',
+        height: '1.5',
+        rx: '0.75',
+        fill: 'url(#accentGrad)',
+        opacity: '0.7'
+      }),
+      // Decorative corner
+      h('path', {
+        d: 'M23 20L27 24L27 27L23 27L23 20Z',
+        fill: 'white',
+        opacity: '0.9'
+      }),
+      h('circle', {
+        cx: '25',
+        cy: '23.5',
+        r: '1',
+        fill: 'url(#accentGrad)'
+      }),
+      // Accent dots
+      h('circle', {
+        cx: '12',
+        cy: '7.5',
+        r: '1',
+        fill: 'white',
+        opacity: '0.9'
+      }),
+      h('circle', {
+        cx: '15',
+        cy: '7.5',
+        r: '1',
+        fill: 'white',
+        opacity: '0.7'
+      })
+    ])
+  }
+}
+
 // Reactive data
 const currentSession = ref('')
 const logEntries = ref([])
@@ -49,6 +188,7 @@ const showBookmarksPanel = ref(true) // 控制书签面板展开/折叠
 const selectedEntryIds = ref([]) // 选中的日志条目ID
 const highlightedEntryId = ref(null) // 当前高亮的条目ID
 const jumpToPage = ref(1) // 跳转到页码输入框的值
+const levelSelectRef = ref(null) // Ref for level filter select dropdown
 
 // Sidebar width management
 const sidebarWidth = ref(300)  // Default width in pixels
@@ -632,6 +772,162 @@ function debouncedSearch() {
   }, 300)
 }
 
+// Handle level select dropdown visibility change
+function handleLevelSelectVisibleChange(visible) {
+  if (visible) {
+    // When dropdown opens, add close listeners
+    nextTick(() => {
+      addDropdownCloseListeners()
+    })
+  } else {
+    // When dropdown closes, remove the listeners
+    removeDropdownCloseListeners()
+  }
+}
+
+// Track mouse position for dropdown close detection
+let dropdownMouseTracker = {
+  isTracking: false,
+  dropdownRect: null,
+  selectRect: null,
+  timer: null,
+  checkInterval: null
+}
+
+// Add listeners to close dropdown
+function addDropdownCloseListeners() {
+  // Remove any existing listeners first
+  removeDropdownCloseListeners()
+
+  const dropdownEl = findDropdownElement()
+  const selectEl = levelSelectRef.value?.$el
+
+  if (!dropdownEl || !selectEl) {
+    // If dropdown not found yet, try again after a short delay
+    setTimeout(() => {
+      const retryDropdown = findDropdownElement()
+      if (retryDropdown) {
+        addDropdownCloseListeners()
+      }
+    }, 100)
+    return
+  }
+
+  // Store the rects for tracking
+  dropdownMouseTracker.dropdownRect = dropdownEl.getBoundingClientRect()
+  dropdownMouseTracker.selectRect = selectEl.getBoundingClientRect()
+  dropdownMouseTracker.isTracking = true
+
+  // Add mousemove listener to track cursor position
+  document.addEventListener('mousemove', handleDropdownMouseMove, { passive: true })
+
+  // Add click-outside listener
+  document.addEventListener('click', handleLevelSelectClickOutside, { capture: true, passive: true })
+}
+
+// Remove listeners
+function removeDropdownCloseListeners() {
+  dropdownMouseTracker.isTracking = false
+  dropdownMouseTracker.dropdownRect = null
+  dropdownMouseTracker.selectRect = null
+
+  if (dropdownMouseTracker.timer) {
+    clearTimeout(dropdownMouseTracker.timer)
+    dropdownMouseTracker.timer = null
+  }
+
+  if (dropdownMouseTracker.checkInterval) {
+    clearInterval(dropdownMouseTracker.checkInterval)
+    dropdownMouseTracker.checkInterval = null
+  }
+
+  document.removeEventListener('mousemove', handleDropdownMouseMove)
+  document.removeEventListener('click', handleLevelSelectClickOutside, { capture: true })
+}
+
+// Find the dropdown element (Element Plus renders it as a separate popper)
+function findDropdownElement() {
+  const selectEl = levelSelectRef.value?.$el
+  if (!selectEl) return null
+
+  // The dropdown has class 'el-select-dropdown' and is usually appended to body
+  // Find the one that belongs to this select by checking the 'x-placement' attribute
+  // or by finding one that's visible
+  const dropdowns = document.querySelectorAll('.el-select-dropdown')
+  for (const dropdown of dropdowns) {
+    // Check if this dropdown is visible and belongs to our select
+    const rect = dropdown.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) {
+      return dropdown
+    }
+  }
+  return null
+}
+
+// Handle mouse move to detect when cursor leaves dropdown area
+function handleDropdownMouseMove(event) {
+  if (!dropdownMouseTracker.isTracking) return
+
+  const x = event.clientX
+  const y = event.clientY
+
+  const dropdownRect = dropdownMouseTracker.dropdownRect
+  const selectRect = dropdownMouseTracker.selectRect
+
+  // Check if cursor is outside both dropdown and select
+  const outsideDropdown = !dropdownRect || (
+    x < dropdownRect.left ||
+    x > dropdownRect.right ||
+    y < dropdownRect.top ||
+    y > dropdownRect.bottom
+  )
+
+  const outsideSelect = !selectRect || (
+    x < selectRect.left ||
+    x > selectRect.right ||
+    y < selectRect.top ||
+    y > selectRect.bottom
+  )
+
+  if (outsideDropdown && outsideSelect) {
+    // Mouse is outside, set a timer to close
+    if (!dropdownMouseTracker.timer) {
+      dropdownMouseTracker.timer = setTimeout(() => {
+        closeDropdown()
+      }, 150)
+    }
+  } else {
+    // Mouse is back inside, cancel the timer
+    if (dropdownMouseTracker.timer) {
+      clearTimeout(dropdownMouseTracker.timer)
+      dropdownMouseTracker.timer = null
+    }
+  }
+}
+
+// Close the dropdown
+function closeDropdown() {
+  levelSelectRef.value?.blur()
+  removeDropdownCloseListeners()
+}
+
+// Handle click outside to close level select dropdown
+function handleLevelSelectClickOutside(event) {
+  const selectEl = levelSelectRef.value?.$el
+  if (!selectEl) return
+
+  const dropdownEl = findDropdownElement()
+
+  // Check if click is outside both the select and the dropdown
+  const clickedOutsideSelect = !selectEl.contains(event.target)
+  const clickedOutsideDropdown = dropdownEl && !dropdownEl.contains(event.target)
+
+  if (clickedOutsideSelect && clickedOutsideDropdown) {
+    // Close the dropdown
+    closeDropdown()
+  }
+}
+
 // Jump to bookmark with animation
 async function jumpToBookmark(bookmark) {
   const bookmarkInfo = bookmark[0] // Bookmark object
@@ -719,6 +1015,8 @@ onUnmounted(() => {
   // Remove resize event listeners
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mouseup', onMouseUp)
+  // Remove dropdown close listeners
+  removeDropdownCloseListeners()
 })
 
 // Watch sortedLogLevels and reset levelFilter if current selection is not available
@@ -811,37 +1109,59 @@ function getTableRowClassName({ row }) {
     <el-dialog
       v-model="showSourceDialog"
       title="打开日志源"
-      width="500px"
+      width="600px"
       :close-on-click-modal="false">
-      <el-radio-group v-model="sourceType" class="source-type-group">
-        <el-radio value="folder" size="large">本地文件夹</el-radio>
-        <div v-if="sourceType === 'folder'" class="folder-selector">
-          <el-button
-            @click="selectLocalFolder"
-            :icon="Folder"
-            class="folder-btn">
-            {{ selectedFolderPath || '浏览...' }}
-          </el-button>
-        </div>
+      <el-tabs v-model="sourceType" class="source-tabs">
+        <el-tab-pane label="本地文件夹" name="folder">
+          <div class="tab-content">
+            <div class="content-description">
+              <el-icon :size="20"><Folder /></el-icon>
+              <span>选择本地计算机上的日志文件夹路径</span>
+            </div>
+            <div class="folder-input-wrapper">
+              <el-input
+                v-model="selectedFolderPath"
+                placeholder="选择或输入本地文件夹路径"
+                :prefix-icon="Folder"
+                clearable
+                size="large"
+                class="folder-input" />
+              <el-button
+                @click="selectLocalFolder"
+                :icon="FolderOpened"
+                size="large"
+                class="browse-btn">
+                浏览
+              </el-button>
+            </div>
+          </div>
+        </el-tab-pane>
 
-        <el-radio value="url" size="large" class="mt-4">HTTP 服务器</el-radio>
-        <el-input
-          v-if="sourceType === 'url'"
-          v-model="httpUrl"
-          placeholder="http://logs.example.com/"
-          :prefix-icon="Link"
-          clearable
-          class="url-input">
-        </el-input>
-      </el-radio-group>
+        <el-tab-pane label="HTTP 服务器" name="url">
+          <div class="tab-content">
+            <div class="content-description">
+              <el-icon :size="20"><Link /></el-icon>
+              <span>输入 HTTP 服务器上的日志目录 URL 地址</span>
+            </div>
+            <el-input
+              v-model="httpUrl"
+              placeholder="例如: http://logs.example.com/test-logs/"
+              :prefix-icon="Link"
+              clearable
+              size="large"
+              class="url-input" />
+          </div>
+        </el-tab-pane>
+      </el-tabs>
 
       <template #footer>
         <el-button @click="showSourceDialog = false">取消</el-button>
         <el-button
           type="primary"
           :disabled="!canOpen"
-          @click="openLogSource">
-          打开
+          @click="openLogSource"
+          size="large">
+          打开日志源
         </el-button>
       </template>
     </el-dialog>
@@ -879,8 +1199,10 @@ function getTableRowClassName({ row }) {
             @click="showSidebar = !showSidebar"
             :title="showSidebar ? '收起左侧面板' : '展开左侧面板'"
             class="sidebar-toggle" />
-          <el-icon class="logo-icon" :size="28"><Document /></el-icon>
-          <span class="app-title">日志查看器</span>
+          <div class="logo-icon">
+            <LogTerminatorIcon />
+          </div>
+          <span class="app-title">logTerminator</span>
 
           <!-- Session Selector -->
           <el-select
@@ -913,17 +1235,20 @@ function getTableRowClassName({ row }) {
               </el-tooltip>
             </el-option>
           </el-select>
-        </div>
 
-        <div class="header-right">
-          <span v-if="loadingMessage" class="loading-message">{{ loadingMessage }}</span>
+          <!-- Open Directory Button (moved here) -->
           <el-button
             type="primary"
             :icon="FolderOpened"
             :loading="loading"
-            @click="openDirectory">
+            @click="openDirectory"
+            class="open-dir-btn">
             打开目录
           </el-button>
+        </div>
+
+        <div class="header-right">
+          <span v-if="loadingMessage" class="loading-message">{{ loadingMessage }}</span>
         </div>
       </div>
 
@@ -1035,11 +1360,13 @@ function getTableRowClassName({ row }) {
                 </el-col>
                 <el-col :span="8">
                   <el-select
+                    ref="levelSelectRef"
                     v-model="levelFilter"
                     placeholder="日志级别"
                     multiple
                     clearable
-                    style="width: 100%">
+                    style="width: 100%"
+                    @visible-change="handleLevelSelectVisibleChange">
                     <el-option
                       v-for="level in sortedLogLevels"
                       :key="level"
@@ -1218,6 +1545,7 @@ function getTableRowClassName({ row }) {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1;
 }
 
 .sidebar-toggle {
@@ -1233,19 +1561,30 @@ function getTableRowClassName({ row }) {
 }
 
 .logo-icon {
+  width: 32px;
+  height: 32px;
   color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .app-title {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 700;
   color: white;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .session-select {
-  width: 300px;
+  width: 280px;
   margin-left: 20px;
+}
+
+.open-dir-btn {
+  margin-left: 12px;
 }
 
 .header-right {
@@ -1529,24 +1868,90 @@ function getTableRowClassName({ row }) {
 }
 
 /* Dialog Styles */
-.source-type-group {
+.source-tabs {
+  margin-top: -12px;
+}
+
+.source-tabs :deep(.el-tabs__header) {
+  margin-bottom: 24px;
+}
+
+.source-tabs :deep(.el-tabs__nav-wrap::after) {
+  display: none;
+}
+
+.source-tabs :deep(.el-tabs__item) {
+  font-size: 15px;
+  padding: 0 24px;
+}
+
+.source-tabs :deep(.el-tabs__active-bar) {
+  height: 3px;
+}
+
+.tab-content {
+  padding: 0 8px;
+}
+
+.content-description {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 12px;
+  margin-bottom: 20px;
+  padding: 16px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e8eef5 100%);
+  border-radius: 8px;
+  border-left: 4px solid #409EFF;
+  color: #606266;
+  font-size: 14px;
 }
 
-.folder-selector {
-  margin-left: 24px;
-  margin-top: 8px;
+.content-description .el-icon {
+  color: #409EFF;
+  flex-shrink: 0;
 }
 
-.folder-btn {
+.content-description span {
+  line-height: 1.6;
+}
+
+.folder-input-wrapper {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.folder-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-input :deep(.el-input__wrapper) {
   width: 100%;
 }
 
+.folder-input :deep(.el-input__inner) {
+  width: 100%;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.browse-btn {
+  flex-shrink: 0;
+  width: 100px;
+  font-weight: 500;
+}
+
 .url-input {
-  margin-left: 24px;
-  margin-top: 8px;
+  width: 100%;
+}
+
+.url-input :deep(.el-input__wrapper) {
+  width: 100%;
+}
+
+.url-input :deep(.el-input__inner) {
+  width: 100%;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
 }
 
 .bookmark-info {

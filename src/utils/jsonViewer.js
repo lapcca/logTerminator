@@ -1,5 +1,157 @@
 /**
+ * Extract JSON content from text using bracket counting
+ * Handles nested structures, strings, escape sequences, and line breaks
+ * @param {string} text - The text to extract JSON from
+ * @param {string} startChar - The opening bracket '{' or '['
+ * @param {string} endChar - The closing bracket '}' or ']'
+ * @returns {string|null} Extracted JSON string or null
+ */
+function extractJsonByBrackets(text, startChar, endChar) {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === startChar) {
+      let depth = 0
+      let inString = false
+      let escapeNext = false
+      let start = i
+
+      for (let j = i; j < text.length; j++) {
+        const char = text[j]
+
+        // Handle escape sequences inside strings
+        if (escapeNext) {
+          escapeNext = false
+          continue
+        }
+
+        // Track escape characters
+        if (char === '\\' && inString) {
+          escapeNext = true
+          continue
+        }
+
+        // Track string boundaries
+        if (char === '"') {
+          inString = !inString
+          continue
+        }
+
+        // Only count brackets when not inside a string
+        if (!inString) {
+          if (char === startChar) {
+            depth++
+          } else if (char === endChar) {
+            depth--
+            if (depth === 0) {
+              // Found complete JSON structure
+              return text.substring(start, j + 1)
+            }
+          }
+        }
+      }
+      // If we exit the loop without finding the closing bracket,
+      // this wasn't a valid JSON start, continue searching
+    }
+  }
+  return null
+}
+
+/**
+ * Extract all potential JSON candidates from text
+ * Uses improved bracket counting to find complete JSON structures
+ * @param {string} text - The text to search
+ * @returns {Array<string>} Array of potential JSON strings
+ */
+function extractJsonCandidates(text) {
+  const candidates = []
+
+  // Extract arrays first (highest priority)
+  const arrayCandidate = extractCompleteStructure(text, '[', ']')
+  if (arrayCandidate) {
+    candidates.push(arrayCandidate)
+  }
+
+  // Extract objects (lower priority, only if different from array)
+  const objectCandidate = extractCompleteStructure(text, '{', '}')
+  if (objectCandidate && objectCandidate !== arrayCandidate) {
+    candidates.push(objectCandidate)
+  }
+
+  return candidates
+}
+
+/**
+ * Extract a complete JSON structure from text using bracket counting
+ * This version returns the largest complete structure found
+ * @param {string} text - The text to search
+ * @param {string} startChar - Opening bracket ([ or {)
+ * @param {string} endChar - Closing bracket (] or })
+ * @returns {string|null} Extracted JSON string or null
+ */
+function extractCompleteStructure(text, startChar, endChar) {
+  let bestMatch = null
+  let bestMatchLength = 0
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === startChar) {
+      let depth = 0
+      let inString = false
+      let escapeNext = false
+      let start = i
+      let end = -1
+
+      for (let j = i; j < text.length; j++) {
+        const char = text[j]
+
+        // Handle escape sequences inside strings
+        if (escapeNext) {
+          escapeNext = false
+          continue
+        }
+
+        // Track escape characters
+        if (char === '\\' && inString) {
+          escapeNext = true
+          continue
+        }
+
+        // Track string boundaries
+        if (char === '"') {
+          inString = !inString
+          continue
+        }
+
+        // Only count brackets when not inside a string
+        if (!inString) {
+          if (char === startChar) {
+            depth++
+          } else if (char === endChar) {
+            depth--
+            if (depth === 0) {
+              end = j
+              break
+            }
+          }
+        }
+      }
+
+      // If we found a complete structure
+      if (end !== -1) {
+        const candidate = text.substring(start, end + 1)
+        // Keep the longest match (to prefer larger structures)
+        if (candidate.length > bestMatchLength) {
+          bestMatch = candidate
+          bestMatchLength = candidate.length
+        }
+      }
+    }
+  }
+
+  return bestMatch
+}
+
+/**
  * Detect if a message contains valid JSON
+ * First attempts direct parse, then bracket counting extraction for mixed content
  * @param {string} message - The message to check
  * @returns {Object} { success: boolean, parsed: object|null, error: string|null }
  */
@@ -10,6 +162,7 @@ export function detectJson(message) {
 
   const trimmed = message.trim()
 
+  // First try: direct parse (for pure JSON messages)
   try {
     const parsed = JSON.parse(trimmed)
     return {
@@ -18,11 +171,30 @@ export function detectJson(message) {
       error: null
     }
   } catch (e) {
-    return {
-      success: false,
-      parsed: null,
-      error: e.message
+    // Continue to extraction approach
+  }
+
+  // Second try: extract JSON from mixed content using bracket counting
+  const candidates = extractJsonCandidates(message)
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate)
+      return {
+        success: true,
+        parsed: parsed,
+        error: null
+      }
+    } catch (e) {
+      // Try next candidate
     }
+  }
+
+  // No valid JSON found
+  return {
+    success: false,
+    parsed: null,
+    error: 'No valid JSON found in message'
   }
 }
 
