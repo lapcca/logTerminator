@@ -310,8 +310,8 @@ async function fetchSessionLogLevels() {
     sessionLogLevels.value = await invoke('get_session_log_levels', { sessionId: currentSession.value })
     // Default to selecting all levels except TRACE
     levelFilter.value = sessionLogLevels.value.filter(level => level !== 'TRACE')
-    // Update selectAll checkbox state based on selection
-    selectAllLevels.value = levelFilter.value.length === sessionLogLevels.value.filter(level => level !== 'TRACE').length
+    // Update selectAll checkbox: only true when ALL levels (including TRACE) are selected
+    selectAllLevels.value = false
   } catch (error) {
     console.error('Error fetching session log levels:', error)
     sessionLogLevels.value = []
@@ -1270,7 +1270,10 @@ function getTableRowClassName({ row }) {
             placeholder="日志级别"
             multiple
             class="level-filter-select"
-            @visible-change="handleLevelSelectVisibleChange">
+            :popper-options="{
+              strategy: 'fixed',
+              modifiers: [{ name: 'flip', enabled: false }]
+            }">
             <template #header>
               <div style="padding: 8px 12px; border-bottom: 1px solid #ebeef5;">
                 <el-checkbox
@@ -1725,6 +1728,7 @@ function getTableRowClassName({ row }) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 0 28px;
 }
 
 .table-card {
