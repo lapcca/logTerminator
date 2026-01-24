@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -61,31 +63,72 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "release_name=v$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Get changelog
+        id: changelog
+        shell: bash
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -z "$LATEST_TAG" ]; then
+            # No tags yet, get all commits
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --reverse)
+          else
+            # Get commits since last tag
+            COMMITS=$(git log ${LATEST_TAG}..HEAD --pretty=format:"- %s (%h)" --reverse)
+          fi
+
+          # Save to file
+          echo "$COMMITS" > changelog.md
+
+          # Set output
+          {
+            echo 'changelog<<EOF'
+            cat changelog.md
+            echo EOF
+          } >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ steps.get_version.outputs.release_name }}
           tag_name: ${{ steps.get_version.outputs.release_name }}
           files: |
-            src-tauri/target/*/release/bundle/nsis/logTerminator_*.nsis.exe
-            src-tauri/target/*/release/logTerminator.exe
+            src-tauri/target/${{ matrix.platform.target }}/release/bundle/nsis/logTerminator_*.nsis.exe
+            src-tauri/target/${{ matrix.platform.target }}/release/logterminator.exe
           draft: false
           prerelease: false
-          generate_release_notes: true
           body: |
-            ## Changes in this Release
+            ## 📦 logTerminator ${{ steps.get_version.outputs.release_name }}
 
-            See the [Release Notes](https://github.com/lapcca/logTerminator/releases/tag/${{ steps.get_version.outputs.release_name }}) for details.
+            ### 📝 Changes
 
-            ### Downloads
+            ${{ steps.changelog.outputs.changelog }}
 
-            - **Installer**: logTerminator_*.nsis.exe (Recommended)
-            - **Portable**: logTerminator.exe
+            ### ⬇️ Downloads
 
-            ### Installation
+            | File | Description |
+            |------|-------------|
+            | `logTerminator_*_x64-setup.exe` | **Installer** (Recommended) - Includes all dependencies |
+            | `logterminator.exe` | **Portable** - Standalone executable |
 
-            1. Download the installer (.nsis.exe)
+            ### 🚀 Installation
+
+            **Option 1: Installer (Recommended)**
+            1. Download `logTerminator_*_x64-setup.exe`
             2. Run the installer
             3. Launch logTerminator from the Start menu or desktop shortcut
+
+            **Option 2: Portable**
+            1. Download `logterminator.exe`
+            2. Place it in any folder
+            3. Run the executable directly
+
+            ### ⚠️ Windows SmartScreen Warning
+
+            When you first run logTerminator, Windows may show a SmartScreen warning. This is because the executable is not digitally signed. Click "More info" and then "Run anyway" to proceed.
+
+            ---
+            **Full Changelog**: https://github.com/lapcca/logTerminator/commits/${{ steps.get_version.outputs.release_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
