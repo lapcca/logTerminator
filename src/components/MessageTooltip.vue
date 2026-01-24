@@ -2,6 +2,7 @@
   <el-popover
     ref="popoverRef"
     :width="popoverWidth"
+    placement="auto"
     trigger="hover"
     :show-after="200"
     :hide-after="100"
@@ -168,16 +169,25 @@ let dragState = {
   rafId: null
 }
 
-// Disable popper auto-positioning completely
+// Allow popper auto-positioning to avoid overflow
 const popperOptions = {
   modifiers: [
     {
       name: 'preventOverflow',
-      enabled: false,
+      enabled: true,
+      options: {
+        boundary: 'viewport',
+        padding: 8,
+      },
     },
     {
       name: 'flip',
-      enabled: false,
+      enabled: true,
+      options: {
+        fallbackPlacements: ['top', 'bottom', 'left', 'right'],
+        boundary: 'viewport',
+        padding: 8,
+      },
     },
     {
       name: 'computeStyles',
