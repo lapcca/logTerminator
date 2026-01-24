@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch:*)",
+      "Bash(git config:*)",
+      "Bash(timeout 5 cat:*)",
+      "Bash(taskkill:*)",
+      "Bash(powershell.exe -Command \"Get-Process | Where-Object {$_ProcessName -like ''*logterminator*''} | Stop-Process -Force\")"
+    ]
+  }
+}
