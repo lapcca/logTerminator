@@ -1262,19 +1262,18 @@ function getTableRowClassName({ row }) {
             style="width: 240px"
             @input="debouncedSearch">
           </el-input>
-        </div>
 
-        <!-- Log Level Filter - separate element to align with table -->
-        <el-select
-          ref="levelSelectRef"
-          v-model="levelFilter"
-          placeholder="日志级别"
-          multiple
-          class="level-filter-select"
-          :popper-options="{
-            strategy: 'fixed',
-            modifiers: [{ name: 'flip', enabled: false }]
-          }">
+          <!-- Log Level Filter -->
+          <el-select
+            ref="levelSelectRef"
+            v-model="levelFilter"
+            placeholder="日志级别"
+            multiple
+            class="level-filter-select"
+            :popper-options="{
+              strategy: 'fixed',
+              modifiers: [{ name: 'flip', enabled: false }]
+            }">
             <template #header>
               <div style="padding: 8px 12px; border-bottom: 1px solid #ebeef5;">
                 <el-checkbox
@@ -1290,6 +1289,7 @@ function getTableRowClassName({ row }) {
               :label="level"
               :value="level" />
           </el-select>
+        </div>
 
         <div class="header-right">
           <span v-if="loadingMessage" class="loading-message">{{ loadingMessage }}</span>
@@ -1538,7 +1538,8 @@ function getTableRowClassName({ row }) {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0; /* Allow flex items to shrink below content size */
 }
 
 .sidebar-toggle {
@@ -1581,12 +1582,10 @@ function getTableRowClassName({ row }) {
 }
 
 .level-filter-select {
-  margin-left: 12px;
   flex: 1;
   min-width: 200px;
+  max-width: 100%;
   box-sizing: border-box;
-  /* Add right margin to match table-card content area (28px padding + 1px border = 29px) */
-  margin-right: 1px;
 }
 
 /* When sidebar is hidden, adjust log level position */
