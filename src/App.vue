@@ -1581,18 +1581,16 @@ function getTableRowClassName({ row }) {
 
 .level-filter-select {
   /* Calculate width: 100% minus all fixed-width elements in header-left */
-  /* Fixed elements: toggle(40) + logo(32) + title(~120) + gaps(36) + session(280) + margin(20) + button(~100) + margin(12) + search(240) + gap(12) = ~892px */
-  width: calc(100% - 890px);
-  max-width: 800px;
+  width: calc(100% - 830px);
+  max-width: 100%;
   min-width: 200px;
   box-sizing: border-box;
-  flex-shrink: 1;
 }
 
 /* When sidebar is hidden, adjust log level position */
 .sidebar-collapsed .level-filter-select {
-  /* When sidebar is collapsed, left elements take less space (~80px for collapsed sidebar area) */
-  width: calc(100% - 320px);
+  /* When sidebar is collapsed, left elements take less space */
+  width: calc(100% - 260px);
 }
 
 .header-right {
