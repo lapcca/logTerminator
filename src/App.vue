@@ -225,7 +225,7 @@ function toggleBookmarksPanel() {
 // Data table options
 const options = reactive({
   page: 1,
-  itemsPerPage: 50,
+  itemsPerPage: 100,
   sortBy: ['timestamp'],
   sortDesc: [false]
 })
@@ -1078,7 +1078,7 @@ function getLevelType(level) {
 
 // Computed table height
 const tableHeight = computed(() => {
-  return showSidebar.value ? 'calc(100vh - 280px)' : 'calc(100vh - 160px)'
+  return showSidebar.value ? 'calc(100vh - 208px)' : 'calc(100vh - 88px)'
 })
 
 // Handle page change
@@ -1242,7 +1242,7 @@ function getTableRowClassName({ row }) {
             </el-option>
           </el-select>
 
-          <!-- Open Directory Button (moved here) -->
+          <!-- Open Directory Button -->
           <el-button
             type="primary"
             :icon="FolderOpened"
@@ -1251,6 +1251,40 @@ function getTableRowClassName({ row }) {
             class="open-dir-btn">
             打开目录
           </el-button>
+
+          <!-- Log Level Filter -->
+          <el-select
+            ref="levelSelectRef"
+            v-model="levelFilter"
+            placeholder="日志级别"
+            multiple
+            style="width: 160px"
+            @visible-change="handleLevelSelectVisibleChange">
+            <template #header>
+              <div style="padding: 8px 12px; border-bottom: 1px solid #ebeef5;">
+                <el-checkbox
+                  v-model="selectAllLevels"
+                  @change="toggleAllLevels">
+                  全选
+                </el-checkbox>
+              </div>
+            </template>
+            <el-option
+              v-for="level in sortedLogLevels"
+              :key="level"
+              :label="level"
+              :value="level" />
+          </el-select>
+
+          <!-- Search Input -->
+          <el-input
+            v-model="searchTerm"
+            placeholder="搜索日志内容..."
+            :prefix-icon="Search"
+            clearable
+            style="width: 240px"
+            @input="debouncedSearch">
+          </el-input>
         </div>
 
         <div class="header-right">
@@ -1349,66 +1383,6 @@ function getTableRowClassName({ row }) {
 
           <!-- Main Content Area -->
           <div class="main-area">
-            <!-- Filters -->
-            <el-card class="filters-card" shadow="hover">
-              <el-row :gutter="16" align="middle">
-                <el-col :span="4">
-                  <el-select
-                    v-model="options.itemsPerPage"
-                    placeholder="每页显示"
-                    @change="handleSizeChange">
-                    <el-option
-                      v-for="opt in itemsPerPageOptions"
-                      :key="opt.value"
-                      :label="opt.title"
-                      :value="opt.value" />
-                  </el-select>
-                </el-col>
-                <el-col :span="8">
-                  <el-select
-                    ref="levelSelectRef"
-                    v-model="levelFilter"
-                    placeholder="日志级别"
-                    multiple
-                    style="width: 100%"
-                    @visible-change="handleLevelSelectVisibleChange">
-                    <template #header>
-                      <div style="padding: 8px 12px; border-bottom: 1px solid #ebeef5;">
-                        <el-checkbox
-                          v-model="selectAllLevels"
-                          @change="toggleAllLevels">
-                          全选
-                        </el-checkbox>
-                      </div>
-                    </template>
-                    <el-option
-                      v-for="level in sortedLogLevels"
-                      :key="level"
-                      :label="level"
-                      :value="level" />
-                  </el-select>
-                </el-col>
-                <el-col :span="6">
-                  <el-input
-                    v-model="searchTerm"
-                    placeholder="搜索日志内容..."
-                    :prefix-icon="Search"
-                    clearable
-                    @input="debouncedSearch">
-                  </el-input>
-                </el-col>
-                <el-col :span="6" class="filter-actions">
-                  <el-button
-                    type="primary"
-                    :icon="Refresh"
-                    :loading="loading"
-                    @click="refreshLogs">
-                    刷新
-                  </el-button>
-                </el-col>
-              </el-row>
-            </el-card>
-
             <!-- Log Table -->
             <el-card class="table-card" shadow="hover">
               <el-table
@@ -1743,17 +1717,7 @@ function getTableRowClassName({ row }) {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 16px;
   overflow: hidden;
-}
-
-.filters-card {
-  flex-shrink: 0;
-}
-
-.filter-actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .table-card {
