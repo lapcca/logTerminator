@@ -1528,17 +1528,15 @@ function getTableRowClassName({ row }) {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
   padding: 0 28px;
   height: 64px;
-  position: relative;
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 0 1 auto; /* Don't force it to expand, but can grow if needed */
+  flex: 1;
   min-width: 0;
 }
 
@@ -1582,9 +1580,8 @@ function getTableRowClassName({ row }) {
 }
 
 .level-filter-select {
-  flex: 1 1 400px; /* Can grow, but with a basis of 400px */
+  flex: 1;
   min-width: 200px;
-  max-width: 100%;
   box-sizing: border-box;
 }
 
@@ -1597,6 +1594,7 @@ function getTableRowClassName({ row }) {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-shrink: 0;
 }
 
 .loading-message {
