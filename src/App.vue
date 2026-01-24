@@ -1019,6 +1019,15 @@ onUnmounted(() => {
   removeDropdownCloseListeners()
 })
 
+// Watch currentSession and fetch log levels when it changes
+watch(currentSession, async (newSessionId) => {
+  if (newSessionId) {
+    await fetchSessionLogLevels()
+  } else {
+    sessionLogLevels.value = []
+  }
+})
+
 // Watch sortedLogLevels and reset levelFilter if current selection is not available
 watch(sortedLogLevels, (newLevels) => {
   // For multi-select: if ALL is selected or any selected level is not available, reset to ALL
