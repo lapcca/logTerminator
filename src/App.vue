@@ -1197,7 +1197,7 @@ function getTableRowClassName({ row }) {
     </el-dialog>
 
     <!-- App Header -->
-    <el-header class="app-header">
+    <el-header class="app-header" :class="{ 'sidebar-collapsed': !showSidebar }">
       <div class="header-content">
         <div class="header-left">
           <el-button
@@ -1580,14 +1580,19 @@ function getTableRowClassName({ row }) {
 }
 
 .level-filter-select {
-  flex: 1;
+  /* Calculate width: 100% minus all fixed-width elements in header-left */
+  /* Fixed elements: toggle(40) + logo(32) + title(~120) + gaps(36) + session(280) + margin(20) + button(~100) + margin(12) + search(240) + gap(12) = ~892px */
+  width: calc(100% - 890px);
+  max-width: 800px;
   min-width: 200px;
   box-sizing: border-box;
+  flex-shrink: 1;
 }
 
 /* When sidebar is hidden, adjust log level position */
 .sidebar-collapsed .level-filter-select {
-  /* No special handling needed with flex layout */
+  /* When sidebar is collapsed, left elements take less space (~80px for collapsed sidebar area) */
+  width: calc(100% - 320px);
 }
 
 .header-right {
