@@ -1585,8 +1585,8 @@ function getTableRowClassName({ row }) {
   flex: 1;
   min-width: 200px;
   box-sizing: border-box;
-  /* Add right margin to match table-card border alignment */
-  padding-right: 1px;
+  /* Add right margin to match table-card content area (28px padding + 1px border = 29px) */
+  margin-right: 1px;
 }
 
 /* When sidebar is hidden, adjust log level position */
