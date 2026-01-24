@@ -88,14 +88,32 @@ jobs:
             echo EOF
           } >> $GITHUB_OUTPUT
 
+      - name: Package Application
+        shell: bash
+        run: |
+          # Create upload directory
+          mkdir -p ./upload
+
+          # Copy NSIS installer (setup file)
+          if [ -f "src-tauri/target/${{ matrix.platform.target }}/release/bundle/nsis/logTerminator_*.nsis.exe" ]; then
+            cp -f src-tauri/target/${{ matrix.platform.target }}/release/bundle/nsis/*.exe ./upload/
+          fi
+
+          # Copy portable executable
+          if [ -f "src-tauri/target/${{ matrix.platform.target }}/release/logterminator.exe" ]; then
+            cp -f src-tauri/target/${{ matrix.platform.target }}/release/logterminator.exe ./upload/
+          fi
+
+          # List uploaded files for debugging
+          echo "Files in upload directory:"
+          ls -la ./upload/
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: Release ${{ steps.get_version.outputs.release_name }}
           tag_name: ${{ steps.get_version.outputs.release_name }}
-          files: |
-            src-tauri/target/${{ matrix.platform.target }}/release/bundle/nsis/logTerminator_*.nsis.exe
-            src-tauri/target/${{ matrix.platform.target }}/release/logterminator.exe
+          files: ./upload/*.*
           draft: false
           prerelease: false
           body: |
