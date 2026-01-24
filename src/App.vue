@@ -1579,17 +1579,18 @@ function getTableRowClassName({ row }) {
   margin-left: 12px;
 }
 
-.level-filter-select {
-  /* Calculate width: 100% minus all fixed-width elements in header-left */
-  width: calc(100% - 870px);
-  min-width: 200px;
-  box-sizing: border-box;
+/* Target the el-select component specifically */
+.header-left .el-select.level-filter-select {
+  width: calc(100% - 870px) !important;
+  min-width: 200px !important;
+  max-width: none !important;
+  flex-shrink: 0 !important;
+  flex-grow: 0 !important;
 }
 
 /* When sidebar is hidden, adjust log level position */
-.sidebar-collapsed .level-filter-select {
-  /* When sidebar is collapsed, left elements take less space */
-  width: calc(100% - 300px);
+.sidebar-collapsed .header-left .el-select.level-filter-select {
+  width: calc(100% - 300px) !important;
 }
 
 .header-right {
