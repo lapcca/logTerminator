@@ -308,9 +308,10 @@ async function fetchSessionLogLevels() {
 
   try {
     sessionLogLevels.value = await invoke('get_session_log_levels', { sessionId: currentSession.value })
-    // Default to selecting all levels
-    levelFilter.value = [...sessionLogLevels.value]
-    selectAllLevels.value = true
+    // Default to selecting all levels except TRACE
+    levelFilter.value = sessionLogLevels.value.filter(level => level !== 'TRACE')
+    // Update selectAll checkbox state based on selection
+    selectAllLevels.value = levelFilter.value.length === sessionLogLevels.value.filter(level => level !== 'TRACE').length
   } catch (error) {
     console.error('Error fetching session log levels:', error)
     sessionLogLevels.value = []
@@ -1252,13 +1253,23 @@ function getTableRowClassName({ row }) {
             打开目录
           </el-button>
 
+          <!-- Search Input -->
+          <el-input
+            v-model="searchTerm"
+            placeholder="搜索日志内容..."
+            :prefix-icon="Search"
+            clearable
+            style="width: 240px"
+            @input="debouncedSearch">
+          </el-input>
+
           <!-- Log Level Filter -->
           <el-select
             ref="levelSelectRef"
             v-model="levelFilter"
             placeholder="日志级别"
             multiple
-            style="width: 160px"
+            class="level-filter-select"
             @visible-change="handleLevelSelectVisibleChange">
             <template #header>
               <div style="padding: 8px 12px; border-bottom: 1px solid #ebeef5;">
@@ -1275,16 +1286,6 @@ function getTableRowClassName({ row }) {
               :label="level"
               :value="level" />
           </el-select>
-
-          <!-- Search Input -->
-          <el-input
-            v-model="searchTerm"
-            placeholder="搜索日志内容..."
-            :prefix-icon="Search"
-            clearable
-            style="width: 240px"
-            @input="debouncedSearch">
-          </el-input>
         </div>
 
         <div class="header-right">
@@ -1573,6 +1574,12 @@ function getTableRowClassName({ row }) {
 
 .open-dir-btn {
   margin-left: 12px;
+}
+
+.level-filter-select {
+  flex: 1;
+  max-width: 600px;
+  min-width: 200px;
 }
 
 .header-right {
