@@ -1,0 +1,58 @@
+<svg width="512" height="512" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Definitions -->
+  <defs>
+    <!-- Background gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#764ba2;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f093fb;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Document gradient -->
+    <linearGradient id="docGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.95" />
+      <stop offset="100%" style="stop-color:#f0f0f5;stop-opacity:0.95" />
+    </linearGradient>
+
+    <!-- Accent gradient for lines -->
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- Glow filter -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="32" height="32" rx="7" fill="url(#bgGrad)"/>
+
+  <!-- Inner glow effect -->
+  <ellipse cx="16" cy="16" rx="11" ry="11" fill="white" opacity="0.08"/>
+
+  <!-- Document shape -->
+  <path d="M8 5C7.4 5 7 5.4 7 6V22C7 22.6 7.4 23 8 23H20C20.6 23 21 22.6 21 22V9L17 5H8Z" fill="url(#docGrad)" filter="url(#glow)"/>
+
+  <!-- Document fold -->
+  <path d="M17 5V9H21" fill="#e0e0ea" opacity="0.6"/>
+
+  <!-- Code/log lines with rounded caps -->
+  <rect x="10" y="11" width="8" height="1.5" rx="0.75" fill="url(#accentGrad)"/>
+  <rect x="10" y="13.5" width="6" height="1.5" rx="0.75" fill="url(#accentGrad)" opacity="0.8"/>
+  <rect x="10" y="16" width="7" height="1.5" rx="0.75" fill="url(#accentGrad)" opacity="0.9"/>
+  <rect x="10" y="18.5" width="5" height="1.5" rx="0.75" fill="url(#accentGrad)" opacity="0.7"/>
+
+  <!-- Decorative corner accent -->
+  <path d="M23 20L27 24L27 27L23 27L23 20Z" fill="white" opacity="0.9"/>
+  <circle cx="25" cy="23.5" r="1" fill="url(#accentGrad)"/>
+
+  <!-- Small accent dots -->
+  <circle cx="12" cy="7.5" r="1" fill="white" opacity="0.9"/>
+  <circle cx="15" cy="7.5" r="1" fill="white" opacity="0.7"/>
+</svg>
