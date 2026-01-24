@@ -1,0 +1,93 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.platform.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.target }}
+
+      - name: Install dependencies (Ubuntu only)
+        if: matrix.platform.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Build application
+        run: pnpm tauri build
+        env:
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+
+      - name: Get version
+        id: get_version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "release_name=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.get_version.outputs.release_name }}
+          tag_name: ${{ steps.get_version.outputs.release_name }}
+          files: |
+            src-tauri/target/*/release/bundle/nsis/logTerminator_*.nsis.exe
+            src-tauri/target/*/release/logTerminator.exe
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## Changes in this Release
+
+            See the [Release Notes](https://github.com/lapcca/logTerminator/releases/tag/${{ steps.get_version.outputs.release_name }}) for details.
+
+            ### Downloads
+
+            - **Installer**: logTerminator_*.nsis.exe (Recommended)
+            - **Portable**: logTerminator.exe
+
+            ### Installation
+
+            1. Download the installer (.nsis.exe)
+            2. Run the installer
+            3. Launch logTerminator from the Start menu or desktop shortcut
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
