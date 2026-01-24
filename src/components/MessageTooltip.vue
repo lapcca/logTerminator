@@ -61,10 +61,11 @@
         <div class="search-input-wrapper">
           <el-input
             v-model="searchTerm"
-            placeholder="Search keys/values..."
+            placeholder="Search keys/values... (Enter for next match)"
             size="small"
             clearable
             @input="handleSearch"
+            @keyup.enter="handleSearchEnter"
             @focus="handleInputFocus">
             <template #prefix>
               <el-icon><Search /></el-icon>
@@ -359,6 +360,13 @@ function handleSearch() {
       applyHighlight()
       scrollToMatch(0)
     })
+  }
+}
+
+function handleSearchEnter() {
+  // Navigate to next match on Enter
+  if (searchResults.value.length > 0) {
+    navigateMatch(1)
   }
 }
 
