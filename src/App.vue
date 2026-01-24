@@ -1289,6 +1289,7 @@ function getTableRowClassName({ row }) {
               :label="level"
               :value="level" />
           </el-select>
+
         </div>
 
         <div class="header-right">
@@ -1411,12 +1412,18 @@ function getTableRowClassName({ row }) {
                   <template #default="{ row }">
                     <el-tooltip
                       v-if="row.stack"
-                      placement="top"
+                      placement="auto"
                       :show-after="200"
                       :hide-after="500"
                       effect="light"
                       popper-class="stack-tooltip-large"
                       :offset="10"
+                      :popper-options="{
+                        modifiers: [
+                          { name: 'flip', options: { fallbackPlacements: ['top', 'bottom', 'left', 'right'] } },
+                          { name: 'preventOverflow', options: { boundary: 'viewport' } }
+                        ]
+                      }"
                       raw-content>
                       <template #content>
                         <div class="tooltip-content">
@@ -1536,7 +1543,7 @@ function getTableRowClassName({ row }) {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
 }
 
@@ -1545,6 +1552,7 @@ function getTableRowClassName({ row }) {
   border: none;
   color: white;
   transition: all 0.3s ease;
+  flex-shrink: 0;
 }
 
 .sidebar-toggle:hover {
@@ -1559,6 +1567,7 @@ function getTableRowClassName({ row }) {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .app-title {
@@ -1568,29 +1577,31 @@ function getTableRowClassName({ row }) {
   letter-spacing: 1px;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  flex-shrink: 0;
 }
 
 .session-select {
   width: 280px;
   margin-left: 20px;
+  flex-shrink: 0;
 }
 
 .open-dir-btn {
   margin-left: 12px;
+  flex-shrink: 0;
 }
 
-/* Target the el-select component specifically */
-.header-left .el-select.level-filter-select {
-  width: calc(100% - 870px) !important;
+/* Log level filter - dynamic width to align with table */
+.level-filter-select {
+  flex: 0 0 auto !important;
+  width: calc(100vw - 1030px) !important;
   min-width: 200px !important;
   max-width: none !important;
-  flex-shrink: 0 !important;
-  flex-grow: 0 !important;
 }
 
-/* When sidebar is hidden, adjust log level position */
-.sidebar-collapsed .header-left .el-select.level-filter-select {
-  width: calc(100% - 300px) !important;
+/* When sidebar is collapsed, log level filter can be wider */
+.sidebar-collapsed .level-filter-select {
+  width: calc(100vw - 430px) !important;
 }
 
 .header-right {
@@ -1598,6 +1609,7 @@ function getTableRowClassName({ row }) {
   align-items: center;
   gap: 16px;
   flex-shrink: 0;
+  min-width: fit-content;
 }
 
 .loading-message {
