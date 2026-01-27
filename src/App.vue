@@ -1468,13 +1468,15 @@ function getTableRowClassName({ row }) {
                 <el-table-column
                   prop="message"
                   label="消息"
-                  min-width="300">
+                  class-name="message-column">
                   <template #default="{ row }">
-                    <MessageTooltip
-                      :message="row.message"
-                      :useDialogForLargeJson="true"
-                      :largeJsonThreshold="2"
-                      @json-detected="(data) => handleJsonDetected(row.id, data)" />
+                    <div class="message-cell-wrapper">
+                      <MessageTooltip
+                        :message="row.message"
+                        :useDialogForLargeJson="true"
+                        :largeJsonThreshold="2"
+                        @json-detected="(data) => handleJsonDetected(row.id, data)" />
+                    </div>
                   </template>
                 </el-table-column>
                 <el-table-column label="书签" width="80" align="center">
@@ -1811,11 +1813,42 @@ function getTableRowClassName({ row }) {
 
 .message-cell {
   font-size: 14px;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+  width: 100%;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   word-break: break-word;
+}
+
+/* Message column wrapper for proper overflow handling */
+.message-cell-wrapper {
+  width: 100%;
+  overflow: hidden;
+  display: block;
+}
+
+/* Element Plus table cell structure - ensure proper overflow */
+:deep(.el-table__body-wrapper .el-table__body .message-column) {
+  overflow: hidden;
+}
+
+:deep(.el-table__body-wrapper .el-table__body .message-column .cell) {
+  width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:deep(.el-table__body-wrapper .el-table__body .message-column .cell .message-cell-wrapper) {
+  width: 100%;
+}
+
+:deep(.el-table__body-wrapper .el-table__body .message-column .cell .message-tooltip-trigger) {
+  width: 100%;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Pagination */
@@ -2154,8 +2187,8 @@ function getTableRowClassName({ row }) {
 }
 
 .message-tooltip-popover .json-content {
-  background-color: #1e1e1e;
-  color: #d4d4d4;
+  background-color: transparent;
+  color: #303133;
   padding: 12px;
   border-radius: 4px;
 }
