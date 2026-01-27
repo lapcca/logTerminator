@@ -57,23 +57,32 @@ function extractJsonByBrackets(text, startChar, endChar) {
 
 /**
  * Extract all potential JSON candidates from text
- * Prioritizes objects over arrays, and outer structures over nested ones
+ * Prioritizes arrays containing objects (e.g., [{...}]), then objects, then bare arrays
  * @param {string} text - The text to search
  * @returns {Array<string>} Array of potential JSON strings
  */
 function extractJsonCandidates(text) {
   const candidates = []
 
-  // Extract objects first (higher priority - most JSON logs start with {)
+  const arrayCandidate = extractCompleteStructure(text, '[', ']')
   const objectCandidate = extractCompleteStructure(text, '{', '}')
+
+  // If array starts with '[{' (array of objects), prioritize it over objects
+  if (arrayCandidate && arrayCandidate.trim().startsWith('[{')) {
+    candidates.push(arrayCandidate)
+  }
+
+  // Then add objects
   if (objectCandidate) {
     candidates.push(objectCandidate)
   }
 
-  // Extract arrays as fallback (only if different from object)
-  const arrayCandidate = extractCompleteStructure(text, '[', ']')
+  // Finally add arrays (if not already added and different from object)
   if (arrayCandidate && arrayCandidate !== objectCandidate) {
-    candidates.push(arrayCandidate)
+    // Only add if it's a pure array (not starting with [{ which we already added)
+    if (!arrayCandidate.trim().startsWith('[{')) {
+      candidates.push(arrayCandidate)
+    }
   }
 
   return candidates
@@ -150,8 +159,81 @@ function extractCompleteStructure(text, startChar, endChar) {
 }
 
 /**
+ * Convert Python-style single-quoted dict/array to valid JSON
+ * Handles escaped quotes and preserves string content
+ * Also converts Python literals (True, False, None) to JSON (true, false, null)
+ * @param {string} str - Python-style string with single quotes
+ * @returns {string} Valid JSON string with double quotes
+ */
+function convertSingleQuotesToJson(str) {
+  let result = ''
+  let inString = false
+  let escapeNext = false
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i]
+
+    if (escapeNext) {
+      // Handle escaped characters
+      if (char === "'") {
+        // Python's \' becomes just ' in JSON (single quotes don't need escaping in double-quoted strings)
+        result += "'"
+      } else if (char === '\\') {
+        // \\ becomes \\
+        result += '\\\\'
+      } else if (char === 'n') {
+        // \n becomes \n
+        result += '\\n'
+      } else if (char === 'r') {
+        // \r becomes \r
+        result += '\\r'
+      } else if (char === 't') {
+        // \t becomes \t
+        result += '\\t'
+      } else {
+        // Other escaped characters
+        result += '\\' + char
+      }
+      escapeNext = false
+      continue
+    }
+
+    if (char === '\\' && inString) {
+      escapeNext = true
+      continue
+    }
+
+    if (char === "'") {
+      // Replace single quote with double quote (string delimiter)
+      result += '"'
+      inString = !inString
+    } else if (!inString) {
+      // Convert Python literals to JSON literals (only when not in string)
+      // Check for True/False/None as complete words
+      if (char === 'T' && str.substr(i, 4) === 'True') {
+        result += 'true'
+        i += 3
+      } else if (char === 'F' && str.substr(i, 5) === 'False') {
+        result += 'false'
+        i += 4
+      } else if (char === 'N' && str.substr(i, 4) === 'None') {
+        result += 'null'
+        i += 3
+      } else {
+        result += char
+      }
+    } else {
+      result += char
+    }
+  }
+
+  return result
+}
+
+/**
  * Detect if a message contains valid JSON
  * First attempts direct parse, then bracket counting extraction for mixed content
+ * Handles both JSON (double quotes) and Python-style (single quotes) formats
  * @param {string} message - The message to check
  * @returns {Object} { success: boolean, parsed: object|null, error: string|null }
  */
@@ -178,6 +260,7 @@ export function detectJson(message) {
   const candidates = extractJsonCandidates(message)
 
   for (const candidate of candidates) {
+    // Try standard JSON first
     try {
       const parsed = JSON.parse(candidate)
       return {
@@ -186,7 +269,18 @@ export function detectJson(message) {
         error: null
       }
     } catch (e) {
-      // Try next candidate
+      // Try converting single quotes to double quotes (Python-style)
+      try {
+        const converted = convertSingleQuotesToJson(candidate)
+        const parsed = JSON.parse(converted)
+        return {
+          success: true,
+          parsed: parsed,
+          error: null
+        }
+      } catch (e2) {
+        // Try next candidate
+      }
     }
   }
 
@@ -274,7 +368,9 @@ export function syntaxHighlightJson(jsonObj, depth = 0) {
  * Toggle JSON node collapse/expand
  * @param {HTMLElement} element - The toggle button element
  */
-window.toggleJsonNode = function(element) {
+// Only assign to window in browser environment
+if (typeof window !== 'undefined') {
+  window.toggleJsonNode = function(element) {
   const parent = element.parentElement
   const items = parent.querySelectorAll(':scope > .json-item')
   const isCollapsed = parent.getAttribute('data-collapsed') === 'true'
@@ -290,6 +386,7 @@ window.toggleJsonNode = function(element) {
     parent.setAttribute('data-collapsed', 'true')
     element.textContent = '[+]'
   }
+}
 }
 
 /**
