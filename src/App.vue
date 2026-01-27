@@ -693,6 +693,13 @@ function formatStack(stack) {
   return stack.replace(/\n/g, ' ').trim()
 }
 
+// Extract time from timestamp (HH:mm:ss,SSS format)
+function extractTimeFromTimestamp(timestamp) {
+  if (!timestamp) return '--:--:--,---'
+  const match = timestamp.match(/(\d{2}:\d{2}:\d{2},\d{3})/)
+  return match ? match[1] : '--:--:--,---'
+}
+
 // Toggle select all
 function toggleSelectAll() {
   if (allSelected.value) {
@@ -1344,6 +1351,7 @@ function getTableRowClassName({ row }) {
                             <el-avatar :size="32" class="bookmark-avatar">
                               <el-icon><StarFilled /></el-icon>
                             </el-avatar>
+                            <span class="bookmark-time">{{ extractTimeFromTimestamp(bookmark[1]?.timestamp) }}</span>
                             <span class="bookmark-title">{{ bookmark[0]?.title || '书签' }}</span>
                             <div class="bookmark-actions">
                               <el-button
@@ -1703,7 +1711,7 @@ function getTableRowClassName({ row }) {
 .bookmark-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   padding: 8px 12px;
   border-radius: 8px;
   cursor: pointer;
@@ -1717,6 +1725,13 @@ function getTableRowClassName({ row }) {
 .bookmark-avatar {
   background-color: #fef3c7;
   color: #f59e0b;
+  flex-shrink: 0;
+}
+
+.bookmark-time {
+  font-size: 13px;
+  color: #606266;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
