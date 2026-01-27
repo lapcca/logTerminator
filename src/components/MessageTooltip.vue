@@ -229,10 +229,7 @@ const truncatedMessage = computed(() => {
   if (!props.message) {
     return '-'
   }
-  const maxLen = 60
-  if (props.message.length > maxLen) {
-    return props.message.substring(0, maxLen) + '...'
-  }
+  // Return full message - let CSS handle truncation with text-overflow: ellipsis
   return props.message
 })
 
@@ -667,10 +664,11 @@ onUnmounted(() => {
 <style scoped>
 .message-tooltip-trigger {
   cursor: pointer;
-  display: inline-block;
-  max-width: 100%;
+  display: block;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .message-tooltip-trigger.has-json {
@@ -743,8 +741,8 @@ onUnmounted(() => {
 }
 
 .json-content {
-  background-color: #1e1e1e;
-  color: #d4d4d4;
+  background-color: transparent;
+  color: #303133;
   padding: 12px;
   border-radius: 4px;
 }
