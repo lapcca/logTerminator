@@ -693,11 +693,13 @@ function formatStack(stack) {
   return stack.replace(/\n/g, ' ').trim()
 }
 
-// Extract time from timestamp (HH:mm:ss,SSS format)
+// Extract time from timestamp (HH:mm:ss format)
 function extractTimeFromTimestamp(timestamp) {
-  if (!timestamp) return '--:--:--,---'
-  const match = timestamp.match(/(\d{2}:\d{2}:\d{2},\d{3})/)
-  return match ? match[1] : '--:--:--,---'
+  if (!timestamp) return '--:--:--'
+  // Match formats like "2026-01-27 16:12:39" or "2026/01/22 07:58:29,723 UTC"
+  // Extract the HH:mm:ss part
+  const match = timestamp.match(/(\d{2}:\d{2}:\d{2})/)
+  return match ? match[1] : '--:--:--'
 }
 
 // Toggle select all

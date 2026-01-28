@@ -252,7 +252,8 @@ impl DatabaseManager {
     pub fn get_bookmarks(&self, session_id: &str) -> SqlResult<Vec<(Bookmark, LogEntry)>> {
         let query = "
             SELECT b.id, b.log_entry_id, b.title, b.notes, b.color, b.created_at,
-                   e.timestamp, e.level, e.stack, e.message
+                   e.id, e.test_session_id, e.file_path, e.file_index,
+                   e.timestamp, e.level, e.stack, e.message, e.line_number
             FROM bookmarks b
             JOIN log_entries e ON b.log_entry_id = e.id
             WHERE e.test_session_id = ?
@@ -262,24 +263,24 @@ impl DatabaseManager {
         let mut stmt = self.conn.prepare(query)?;
         let bookmark_iter = stmt.query_map([session_id], |row| {
             let bookmark = Bookmark {
-                id: Some(row.get(0)?),
-                log_entry_id: row.get(1)?,
-                title: row.get(2)?,
-                notes: row.get(3)?,
-                color: row.get(4)?,
-                created_at: None,
+                id: Some(row.get(0)?),     // b.id
+                log_entry_id: row.get(1)?,  // b.log_entry_id
+                title: row.get(2)?,         // b.title
+                notes: row.get(3)?,         // b.notes
+                color: row.get(4)?,         // b.color
+                created_at: None,           // b.created_at - skip for now
             };
 
             let entry = LogEntry {
-                id: Some(row.get(1)?), // log_entry_id
-                test_session_id: session_id.to_string(),
-                file_path: "".to_string(), // Not needed for bookmark display
-                file_index: 0,
-                timestamp: row.get(5)?,
-                level: row.get(6)?,
-                stack: row.get(7)?,
-                message: row.get(8)?,
-                line_number: 0,
+                id: row.get(6).ok(),              // e.id
+                test_session_id: row.get(7)?,     // e.test_session_id
+                file_path: row.get(8)?,           // e.file_path
+                file_index: row.get(9)?,          // e.file_index
+                timestamp: row.get(10)?,          // e.timestamp (CORRECTED!)
+                level: row.get(11)?,              // e.level (CORRECTED!)
+                stack: row.get(12)?,              // e.stack
+                message: row.get(13)?,            // e.message
+                line_number: row.get(14)?,        // e.line_number
                 created_at: None,
             };
 
