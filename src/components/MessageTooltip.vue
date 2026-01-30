@@ -771,12 +771,27 @@ function handleDragStart(e) {
 function handleDragMove(e) {
   if (!dragState.isDragging || !dragState.popperElement) return
 
-  dragState.currentX = e.clientX - dragState.startX
-  dragState.currentY = e.clientY - dragState.startY
+  let newX = e.clientX - dragState.startX
+  let newY = e.clientY - dragState.startY
   dragState.hasDragged = true
 
-  // Apply position directly using fixed positioning
+  // Clamp to window bounds
   const popper = dragState.popperElement
+  const rect = popper.getBoundingClientRect()
+  const maxX = window.innerWidth - rect.width
+  const maxY = window.innerHeight - rect.height
+
+  newX = Math.max(0, Math.min(newX, maxX))
+  newY = Math.max(64, Math.min(newY, maxY)) // 64 is header height
+
+  dragState.currentX = newX
+  dragState.currentY = newY
+
+  // Update position state for pinned tooltips
+  if (props.isPinned) {
+    currentPosition.value = { x: newX, y: newY }
+    emit('position-update', currentPosition.value)
+  }
 
   // Disable all transitions and animations
   popper.style.transition = 'none'
@@ -784,8 +799,8 @@ function handleDragMove(e) {
 
   // Set fixed position with !important to override popper.js
   popper.style.setProperty('position', 'fixed', 'important')
-  popper.style.setProperty('left', `${dragState.currentX}px`, 'important')
-  popper.style.setProperty('top', `${dragState.currentY}px`, 'important')
+  popper.style.setProperty('left', `${newX}px`, 'important')
+  popper.style.setProperty('top', `${newY}px`, 'important')
   popper.style.setProperty('right', 'auto', 'important')
   popper.style.setProperty('bottom', 'auto', 'important')
   popper.style.setProperty('transform', 'none', 'important')
@@ -829,6 +844,15 @@ watch(viewMode, (newMode) => {
     }
   })
 })
+
+// Watch for position/size changes in pinned mode
+watch([currentPosition, currentSize], () => {
+  if (props.isPinned) {
+    nextTick(() => {
+      applyPinnedPosition()
+    })
+  }
+}, { deep: true })
 
 // Initialize position/size for pinned tooltips
 watch(() => props.isPinned, (isPinned) => {
