@@ -135,10 +135,22 @@ const props = defineProps({
   largeJsonThreshold: {
     type: Number,
     default: 2 // KB
+  },
+  isPinned: {
+    type: Boolean,
+    default: false
+  },
+  initialPosition: {
+    type: Object,
+    default: () => ({ x: 0, y: 0 })
+  },
+  initialSize: {
+    type: Object,
+    default: () => ({ width: 600, height: 400 })
   }
 })
 
-const emit = defineEmits(['json-detected'])
+const emit = defineEmits(['json-detected', 'pin', 'close', 'position-update', 'size-update'])
 
 // Refs
 const popoverRef = ref(null)
@@ -156,6 +168,10 @@ const displayJson = ref('')      // Currently displayed JSON (may include search
 const searchTerm = ref('')
 const searchResults = ref([])
 const currentMatchIndex = ref(0)
+
+// Pinned state
+const currentSize = ref({ width: 600, height: 400 })
+const currentPosition = ref({ x: 0, y: 0 })
 
 // Drag state - use plain variables for better performance
 let dragState = {
@@ -651,6 +667,14 @@ watch(viewMode, (newMode) => {
   })
 })
 
+// Initialize position/size for pinned tooltips
+watch(() => props.isPinned, (isPinned) => {
+  if (isPinned) {
+    currentPosition.value = { ...props.initialPosition }
+    currentSize.value = { ...props.initialSize }
+  }
+}, { immediate: true })
+
 onUnmounted(() => {
   document.removeEventListener('mousemove', handleDragMove)
   document.removeEventListener('mouseup', handleDragEnd)
@@ -741,10 +765,11 @@ onUnmounted(() => {
 }
 
 .json-content {
-  background-color: transparent;
-  color: #303133;
-  padding: 12px;
-  border-radius: 4px;
+  background-color: #282c34;
+  color: #abb2bf;
+  padding: 16px;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 .search-bar {
@@ -794,18 +819,18 @@ onUnmounted(() => {
   left: -40px;
   cursor: pointer;
   user-select: none;
-  color: #409EFF;
+  color: #61afef;
   font-weight: bold;
   font-size: 12px;
 }
 
 :deep(.json-toggle:hover) {
-  color: #66b1ff;
+  color: #98c379;
 }
 
 :deep(.json-item) {
   margin-left: 40px; /* 4-space indentation */
-  border-left: 1px solid #444;
+  border-left: 1px solid #4b5263;
   padding-left: 8px;
 }
 
@@ -815,18 +840,20 @@ onUnmounted(() => {
 
 /* Search highlighting */
 :deep(mark.json-search-highlight) {
-  background-color: rgba(255, 200, 0, 0.4);
-  color: #000;
-  border-radius: 2px;
-  padding: 1px 2px;
+  background-color: rgba(234, 166, 56, 0.5);
+  color: #fff;
+  border-radius: 3px;
+  padding: 2px 4px;
   font-weight: bold;
   transition: background-color 0.2s;
+  box-shadow: 0 0 0 1px rgba(234, 166, 56, 0.3);
 }
 
 :deep(mark.json-search-current) {
-  background-color: rgba(255, 100, 0, 0.6) !important;
-  outline: 2px solid #ff6600;
-  outline-offset: -2px;
-  border-radius: 2px;
+  background-color: rgba(234, 166, 56, 0.8) !important;
+  outline: 2px solid #e6a555;
+  outline-offset: 1px;
+  border-radius: 3px;
+  box-shadow: 0 0 8px rgba(234, 166, 56, 0.5);
 }
 </style>
