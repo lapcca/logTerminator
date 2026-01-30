@@ -1090,17 +1090,14 @@ watch(sidebarWidth, (newWidth) => {
   localStorage.setItem('sidebarWidth', newWidth)
 })
 
-// Auto-focus input when dialog opens
-watch(showSourceDialog, async (isOpen) => {
-  if (isOpen) {
-    await nextTick()
-    // Use nextTick again to ensure the dialog animation is complete
-    await nextTick()
+// Handle dialog opened event - focus input when dialog is fully opened
+function handleSourceDialogOpened() {
+  nextTick(() => {
     if (logSourceInputRef.value) {
       logSourceInputRef.value.focus()
     }
-  }
-})
+  })
+}
 
 // Element Plus Table helpers
 function getLevelType(level) {
@@ -1154,7 +1151,8 @@ function getTableRowClassName({ row }) {
       v-model="showSourceDialog"
       title="打开日志源"
       width="600px"
-      :close-on-click-modal="false">
+      :close-on-click-modal="false"
+      @opened="handleSourceDialogOpened">
       <div class="log-source-content">
         <div class="content-description">
           <el-icon :size="20"><Link v-if="inputSourceType === 'url'" /><Folder v-else /></el-icon>
