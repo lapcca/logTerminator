@@ -200,6 +200,7 @@ const resizeStartWidth = ref(0) // Sidebar width when drag starts
 // Log source dialog
 const showSourceDialog = ref(false)
 const logSourceInput = ref('') // Combined input for both URL and folder path
+const logSourceInputRef = ref(null) // Ref for the input element
 
 // Detect input type based on content
 const inputSourceType = computed(() => {
@@ -300,14 +301,9 @@ const totalPages = computed(() => Math.ceil(totalEntries.value / options.itemsPe
 
 // Show source dialog
 async function openDirectory() {
-  showSourceDialog.value = true
   logSourceInput.value = ''
-  // Focus on the input field after the dialog is shown
-  await nextTick()
-  const input = document.querySelector('.log-source-input input')
-  if (input) {
-    input.focus()
-  }
+  showSourceDialog.value = true
+  // Focus will be handled by the watch on showSourceDialog
 }
 
 // Fetch all log levels for the current session
@@ -1094,6 +1090,18 @@ watch(sidebarWidth, (newWidth) => {
   localStorage.setItem('sidebarWidth', newWidth)
 })
 
+// Auto-focus input when dialog opens
+watch(showSourceDialog, async (isOpen) => {
+  if (isOpen) {
+    await nextTick()
+    // Use nextTick again to ensure the dialog animation is complete
+    await nextTick()
+    if (logSourceInputRef.value) {
+      logSourceInputRef.value.focus()
+    }
+  }
+})
+
 // Element Plus Table helpers
 function getLevelType(level) {
   const types = {
@@ -1155,6 +1163,7 @@ function getTableRowClassName({ row }) {
         </div>
         <div class="source-input-wrapper">
           <el-input
+            ref="logSourceInputRef"
             v-model="logSourceInput"
             :placeholder="inputSourceType === 'url' ? '例如: http://logs.example.com/test-logs/' : '选择或输入本地文件夹路径，或输入 HTTP URL'"
             :prefix-icon="inputSourceType === 'url' ? Link : Folder"
