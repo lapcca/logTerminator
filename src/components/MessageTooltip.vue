@@ -216,7 +216,6 @@ let dragState = {
   currentX: 0,
   currentY: 0,
   popperElement: null,
-  positionLockObserver: null,
   rafId: null
 }
 
@@ -554,12 +553,6 @@ function resetDragState() {
   dragState.currentX = 0
   dragState.currentY = 0
 
-  // Stop position lock observer
-  if (dragState.positionLockObserver) {
-    dragState.positionLockObserver.disconnect()
-    dragState.positionLockObserver = null
-  }
-
   // Stop RAF
   if (dragState.rafId) {
     cancelAnimationFrame(dragState.rafId)
@@ -744,6 +737,9 @@ function handleInputFocus() {
 
 // Drag handlers
 function handleDragStart(e) {
+  // Guard clause: prevent starting a new drag if already dragging
+  if (dragState.isDragging) return
+
   // Only allow dragging from header
   if (!e.target.closest('.tooltip-header')) return
 
@@ -782,7 +778,7 @@ function handleDragMove(e) {
   const maxY = window.innerHeight - rect.height
 
   newX = Math.max(0, Math.min(newX, maxX))
-  newY = Math.max(64, Math.min(newY, maxY)) // 64 is header height
+  newY = Math.max(HEADER_HEIGHT, Math.min(newY, maxY))
 
   dragState.currentX = newX
   dragState.currentY = newY
@@ -869,9 +865,6 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', handleResizeEnd)
   resizeState.isResizing = false
   unlockPosition()
-  if (dragState.positionLockObserver) {
-    dragState.positionLockObserver.disconnect()
-  }
 })
 </script>
 
