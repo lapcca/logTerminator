@@ -222,6 +222,7 @@ let dragState = {
 
 // Resize state
 const MIN_SIZE = { width: 300, height: 200 }
+const HEADER_HEIGHT = 64
 let resizeState = {
   isResizing: false,
   direction: null,
@@ -588,7 +589,7 @@ function startResize(e, direction) {
   resizeState.startTop = rect.top
 
   document.addEventListener('mousemove', handleResizeMove, { passive: false })
-  document.addEventListener('mouseup', handleResizeEnd)
+  document.addEventListener('mouseup', handleResizeEnd, { passive: false })
 }
 
 function handleResizeMove(e) {
@@ -620,14 +621,14 @@ function handleResizeMove(e) {
 
   // Clamp to min/max
   const maxWidth = window.innerWidth - newX
-  const maxHeight = window.innerHeight - newY - 64 // minus header
+  const maxHeight = window.innerHeight - newY - HEADER_HEIGHT // minus header
 
   newWidth = Math.max(MIN_SIZE.width, Math.min(newWidth, maxWidth))
   newHeight = Math.max(MIN_SIZE.height, Math.min(newHeight, maxHeight))
 
   // Clamp position
   newX = Math.max(0, Math.min(newX, window.innerWidth - newWidth))
-  newY = Math.max(64, Math.min(newY, window.innerHeight - newHeight))
+  newY = Math.max(HEADER_HEIGHT, Math.min(newY, window.innerHeight - newHeight))
 
   currentSize.value = { width: newWidth, height: newHeight }
   currentPosition.value = { x: newX, y: newY }
@@ -839,6 +840,7 @@ onUnmounted(() => {
   document.removeEventListener('mouseup', handleDragEnd)
   document.removeEventListener('mousemove', handleResizeMove)
   document.removeEventListener('mouseup', handleResizeEnd)
+  resizeState.isResizing = false
   unlockPosition()
   if (dragState.positionLockObserver) {
     dragState.positionLockObserver.disconnect()
