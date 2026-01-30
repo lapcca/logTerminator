@@ -337,6 +337,9 @@ async function fetchSessionLogLevels() {
 
 // Handle session change from selector
 async function onSessionChange() {
+  // Close pinned tooltip when switching sessions
+  closePinnedTooltip()
+
   await fetchSessionLogLevels() // Fetch all log levels for this session
   refreshLogs()
 }
