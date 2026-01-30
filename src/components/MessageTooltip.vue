@@ -603,26 +603,29 @@ function handleResizeMove(e) {
   let newX = currentPosition.value.x
   let newY = currentPosition.value.y
 
+  // Calculate max bounds based on current position before applying changes
+  const maxWidth = window.innerWidth - currentPosition.value.x
+  const maxHeight = window.innerHeight - currentPosition.value.y - HEADER_HEIGHT
+
   // Calculate new size based on direction
   if (resizeState.direction.includes('e')) {
     newWidth = resizeState.startWidth + deltaX
   }
   if (resizeState.direction.includes('w')) {
     newWidth = resizeState.startWidth - deltaX
-    newX = resizeState.startLeft + deltaX
+    // Use current position as starting point, not startLeft
+    newX = currentPosition.value.x + deltaX
   }
   if (resizeState.direction.includes('s')) {
     newHeight = resizeState.startHeight + deltaY
   }
   if (resizeState.direction.includes('n')) {
     newHeight = resizeState.startHeight - deltaY
-    newY = resizeState.startTop + deltaY
+    // Use current position as starting point, not startTop
+    newY = currentPosition.value.y + deltaY
   }
 
   // Clamp to min/max
-  const maxWidth = window.innerWidth - newX
-  const maxHeight = window.innerHeight - newY - HEADER_HEIGHT // minus header
-
   newWidth = Math.max(MIN_SIZE.width, Math.min(newWidth, maxWidth))
   newHeight = Math.max(MIN_SIZE.height, Math.min(newHeight, maxHeight))
 
