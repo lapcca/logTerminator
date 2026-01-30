@@ -132,6 +132,22 @@
           </div>
         </div>
       </div>
+
+      <!-- Resize handles (only for pinned tooltips) -->
+      <div v-if="isPinned" class="resize-handles">
+        <!-- Edges -->
+        <div class="resize-handle n" @mousedown="startResize($event, 'n')"></div>
+        <div class="resize-handle s" @mousedown="startResize($event, 's')"></div>
+        <div class="resize-handle e" @mousedown="startResize($event, 'e')"></div>
+        <div class="resize-handle w" @mousedown="startResize($event, 'w')"></div>
+
+        <!-- Corners -->
+        <div class="resize-handle ne" @mousedown="startResize($event, 'ne')"></div>
+        <div class="resize-handle nw" @mousedown="startResize($event, 'nw')"></div>
+        <div class="resize-handle se" @mousedown="startResize($event, 'se')"></div>
+        <div class="resize-handle sw" @mousedown="startResize($event, 'sw')"></div>
+      </div>
+    </div>
     </div>
   </el-popover>
 </template>
@@ -911,5 +927,90 @@ onUnmounted(() => {
   outline-offset: 1px;
   border-radius: 3px;
   box-shadow: 0 0 8px rgba(234, 166, 56, 0.5);
+}
+
+/* Resize Handles */
+.resize-handles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.resize-handle {
+  position: absolute;
+  background: transparent;
+  pointer-events: auto;
+  transition: background 0.2s;
+}
+
+.resize-handle:hover {
+  background: rgba(64, 158, 255, 0.2);
+}
+
+/* Edges */
+.resize-handle.n,
+.resize-handle.s {
+  left: 4px;
+  right: 4px;
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.resize-handle.n {
+  top: 0;
+}
+
+.resize-handle.s {
+  bottom: 0;
+}
+
+.resize-handle.e,
+.resize-handle.w {
+  top: 4px;
+  bottom: 4px;
+  width: 4px;
+  cursor: ew-resize;
+}
+
+.resize-handle.e {
+  right: 0;
+}
+
+.resize-handle.w {
+  left: 0;
+}
+
+/* Corners */
+.resize-handle.ne,
+.resize-handle.nw,
+.resize-handle.se,
+.resize-handle.sw {
+  width: 12px;
+  height: 12px;
+}
+
+.resize-handle.ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.resize-handle.nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.resize-handle.se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}
+
+.resize-handle.sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
 }
 </style>
