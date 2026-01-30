@@ -293,9 +293,15 @@ const totalPages = computed(() => Math.ceil(totalEntries.value / options.itemsPe
 // Show source dialog
 async function openDirectory() {
   showSourceDialog.value = true
-  sourceType.value = 'folder'
+  sourceType.value = 'url' // Default to HTTP server tab
   selectedFolderPath.value = ''
   httpUrl.value = ''
+  // Focus on the URL input field after the dialog is shown
+  await nextTick()
+  const urlInput = document.querySelector('.url-input input')
+  if (urlInput) {
+    urlInput.focus()
+  }
 }
 
 // Fetch all log levels for the current session
@@ -381,6 +387,13 @@ async function selectLocalFolder() {
     }
   } catch (error) {
     console.error('Error selecting folder:', error)
+  }
+}
+
+// Handle Enter key in source dialog
+async function handleSourceDialogEnter() {
+  if (canOpen.value) {
+    await openLogSource()
   }
 }
 
@@ -1128,6 +1141,23 @@ function getTableRowClassName({ row }) {
       width="600px"
       :close-on-click-modal="false">
       <el-tabs v-model="sourceType" class="source-tabs">
+        <el-tab-pane label="HTTP 服务器" name="url">
+          <div class="tab-content">
+            <div class="content-description">
+              <el-icon :size="20"><Link /></el-icon>
+              <span>输入 HTTP 服务器上的日志目录 URL 地址</span>
+            </div>
+            <el-input
+              v-model="httpUrl"
+              placeholder="例如: http://logs.example.com/test-logs/"
+              :prefix-icon="Link"
+              clearable
+              size="large"
+              class="url-input"
+              @keyup.enter="handleSourceDialogEnter" />
+          </div>
+        </el-tab-pane>
+
         <el-tab-pane label="本地文件夹" name="folder">
           <div class="tab-content">
             <div class="content-description">
@@ -1141,7 +1171,8 @@ function getTableRowClassName({ row }) {
                 :prefix-icon="Folder"
                 clearable
                 size="large"
-                class="folder-input" />
+                class="folder-input"
+                @keyup.enter="handleSourceDialogEnter" />
               <el-button
                 @click="selectLocalFolder"
                 :icon="FolderOpened"
@@ -1150,22 +1181,6 @@ function getTableRowClassName({ row }) {
                 浏览
               </el-button>
             </div>
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="HTTP 服务器" name="url">
-          <div class="tab-content">
-            <div class="content-description">
-              <el-icon :size="20"><Link /></el-icon>
-              <span>输入 HTTP 服务器上的日志目录 URL 地址</span>
-            </div>
-            <el-input
-              v-model="httpUrl"
-              placeholder="例如: http://logs.example.com/test-logs/"
-              :prefix-icon="Link"
-              clearable
-              size="large"
-              class="url-input" />
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -1832,9 +1847,13 @@ function getTableRowClassName({ row }) {
   font-size: 14px;
   width: 100%;
   overflow: hidden;
+  /* Support multi-line display with max 3 lines */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   text-overflow: ellipsis;
-  white-space: nowrap;
   word-break: break-word;
+  line-height: 1.5;
 }
 
 /* Message column wrapper for proper overflow handling */
@@ -1846,14 +1865,20 @@ function getTableRowClassName({ row }) {
 
 /* Element Plus table cell structure - ensure proper overflow */
 :deep(.el-table__body-wrapper .el-table__body .message-column) {
-  overflow: hidden;
+  overflow: visible;
 }
 
 :deep(.el-table__body-wrapper .el-table__body .message-column .cell) {
   width: 100% !important;
-  overflow: hidden !important;
+  overflow: visible !important;
+  /* Support multi-line display with max 3 lines */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.5;
 }
 
 :deep(.el-table__body-wrapper .el-table__body .message-column .cell .message-cell-wrapper) {
@@ -1863,9 +1888,14 @@ function getTableRowClassName({ row }) {
 :deep(.el-table__body-wrapper .el-table__body .message-column .cell .message-tooltip-trigger) {
   width: 100%;
   display: block;
-  overflow: hidden;
+  /* Support multi-line display with max 3 lines */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.5;
 }
 
 /* Pagination */
