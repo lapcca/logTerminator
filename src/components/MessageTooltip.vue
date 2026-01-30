@@ -20,12 +20,31 @@
 
     <div class="message-tooltip-content">
       <!-- Header with drag handle, toggle and copy buttons -->
-      <div
-        class="tooltip-header"
-        @mousedown="handleDragStart">
+      <div class="tooltip-header" @mousedown="handleDragStart">
         <div class="drag-handle">
           <el-icon><Rank /></el-icon>
         </div>
+
+        <!-- Pin button (shown when not pinned) -->
+        <el-button
+          v-if="!isPinned"
+          :icon="PushPin"
+          size="small"
+          class="pin-btn"
+          @click.stop="handlePin"
+          title="固定悬浮框">
+        </el-button>
+
+        <!-- Close button (shown when pinned) -->
+        <el-button
+          v-if="isPinned"
+          :icon="Close"
+          size="small"
+          class="close-btn"
+          @click.stop="handleClose"
+          title="关闭">
+        </el-button>
+
         <div class="view-toggles">
           <el-button
             :type="viewMode === 'raw' ? 'primary' : 'default'"
@@ -120,7 +139,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, ArrowUp, ArrowDown, Rank } from '@element-plus/icons-vue'
+import { Search, ArrowUp, ArrowDown, Rank, PushPin, Close } from '@element-plus/icons-vue'
 import { detectJson, syntaxHighlightJson, prettifyJson, getJsonSize, searchInJson } from '../utils/jsonViewer.js'
 
 const props = defineProps({
@@ -436,6 +455,23 @@ function escapeRegex(string) {
 function removeHighlight() {
   // Simply restore the original highlighted JSON
   displayJson.value = highlightedJson.value
+}
+
+function handlePin() {
+  const popper = getPopperElement()
+  if (!popper) return
+
+  const rect = popper.getBoundingClientRect()
+  emit('pin', {
+    message: props.message,
+    hasJson: hasJson.value,
+    position: { x: rect.left, y: rect.top },
+    size: { width: rect.width, height: rect.height }
+  })
+}
+
+function handleClose() {
+  emit('close')
 }
 
 function navigateMatch(direction) {
@@ -806,6 +842,26 @@ onUnmounted(() => {
   display: flex;
   gap: 4px;
   margin-left: auto;
+}
+
+/* Pin and Close buttons */
+.pin-btn {
+  color: #909399;
+  transition: all 0.2s;
+}
+
+.pin-btn:hover {
+  color: #409EFF;
+  background: rgba(64, 158, 255, 0.1);
+}
+
+.close-btn {
+  color: #909399;
+}
+
+.close-btn:hover {
+  color: #f56c6c;
+  background: rgba(245, 108, 108, 0.1);
 }
 
 /* JSON styles - use :deep() to apply to v-html content */
