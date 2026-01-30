@@ -191,6 +191,15 @@ const highlightedEntryId = ref(null) // 当前高亮的条目ID
 const jumpToPage = ref(1) // 跳转到页码输入框的值
 const levelSelectRef = ref(null) // Ref for level filter select dropdown
 
+// Pinned tooltip state
+const pinnedTooltip = ref({
+  visible: false,
+  message: '',
+  hasJson: false,
+  position: { x: 0, y: 0 },
+  size: { width: 600, height: 400 }
+})
+
 // Sidebar width management
 const sidebarWidth = ref(300)  // Default width in pixels
 const isResizing = ref(false)  // Track if user is dragging
@@ -1142,6 +1151,38 @@ function getTableRowClassName({ row }) {
   }
   return classes.join(' ')
 }
+
+// Handle pin request from MessageTooltip
+function handleTooltipPin(data) {
+  // Close existing pinned tooltip if any
+  if (pinnedTooltip.value.visible) {
+    closePinnedTooltip()
+  }
+
+  // Set new pinned tooltip
+  pinnedTooltip.value = {
+    visible: true,
+    message: data.message,
+    hasJson: data.hasJson,
+    position: data.position,
+    size: data.size
+  }
+}
+
+// Close pinned tooltip
+function closePinnedTooltip() {
+  pinnedTooltip.value.visible = false
+}
+
+// Update pinned tooltip position
+function updatePinnedPosition(pos) {
+  pinnedTooltip.value.position = pos
+}
+
+// Update pinned tooltip size
+function updatePinnedSize(size) {
+  pinnedTooltip.value.size = size
+}
 </script>
 
 <template>
@@ -1540,6 +1581,18 @@ function getTableRowClassName({ row }) {
         </div>
       </div>
     </el-main>
+
+    <!-- Pinned Tooltip Container -->
+    <div v-if="pinnedTooltip.visible" class="pinned-tooltip-container">
+      <MessageTooltip
+        :message="pinnedTooltip.message"
+        :is-pinned="true"
+        :initial-position="pinnedTooltip.position"
+        :initial-size="pinnedTooltip.size"
+        @close="closePinnedTooltip"
+        @position-update="updatePinnedPosition"
+        @size-update="updatePinnedSize" />
+    </div>
   </div>
 </template>
 
@@ -2166,6 +2219,17 @@ function getTableRowClassName({ row }) {
 
 .tooltip-stack-table :deep(.el-table__body tr:hover > td) {
   background-color: #f5f7fa !important;
+}
+
+/* Pinned Tooltip Container */
+.pinned-tooltip-container {
+  position: fixed;
+  z-index: 2000;
+  pointer-events: none;
+}
+
+.pinned-tooltip-container :deep(.el-popover) {
+  pointer-events: auto;
 }
 </style>
 
