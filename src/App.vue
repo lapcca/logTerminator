@@ -199,17 +199,25 @@ const resizeStartWidth = ref(0) // Sidebar width when drag starts
 
 // Log source dialog
 const showSourceDialog = ref(false)
-const sourceType = ref('folder') // 'folder' or 'url'
-const httpUrl = ref('')
-const selectedFolderPath = ref('')
+const logSourceInput = ref('') // Combined input for both URL and folder path
+
+// Detect input type based on content
+const inputSourceType = computed(() => {
+  const input = logSourceInput.value.trim()
+  if (input.startsWith('http://') || input.startsWith('https://')) {
+    return 'url'
+  }
+  return 'folder'
+})
 
 // Helper for dialog
 const canOpen = computed(() => {
-  if (sourceType.value === 'folder') {
-    return selectedFolderPath.value !== ''
-  } else {
-    return httpUrl.value !== '' && httpUrl.value.match(/^https?:\/\//)
+  const input = logSourceInput.value.trim()
+  if (input === '') return false
+  if (inputSourceType.value === 'url') {
+    return input.match(/^https?:\/\//) !== null
   }
+  return true // Any non-empty input is considered valid for folder
 })
 
 // Bookmark editing
@@ -293,14 +301,12 @@ const totalPages = computed(() => Math.ceil(totalEntries.value / options.itemsPe
 // Show source dialog
 async function openDirectory() {
   showSourceDialog.value = true
-  sourceType.value = 'url' // Default to HTTP server tab
-  selectedFolderPath.value = ''
-  httpUrl.value = ''
-  // Focus on the URL input field after the dialog is shown
+  logSourceInput.value = ''
+  // Focus on the input field after the dialog is shown
   await nextTick()
-  const urlInput = document.querySelector('.url-input input')
-  if (urlInput) {
-    urlInput.focus()
+  const input = document.querySelector('.log-source-input input')
+  if (input) {
+    input.focus()
   }
 }
 
@@ -383,7 +389,7 @@ async function selectLocalFolder() {
       title: 'Select Log Directory'
     })
     if (selected) {
-      selectedFolderPath.value = selected
+      logSourceInput.value = selected
     }
   } catch (error) {
     console.error('Error selecting folder:', error)
@@ -401,10 +407,11 @@ async function handleSourceDialogEnter() {
 async function openLogSource() {
   showSourceDialog.value = false
 
-  if (sourceType.value === 'url' && httpUrl.value) {
-    await loadFromHttpUrl(httpUrl.value)
-  } else if (sourceType.value === 'folder' && selectedFolderPath.value) {
-    await loadFromDirectory(selectedFolderPath.value)
+  const input = logSourceInput.value.trim()
+  if (inputSourceType.value === 'url') {
+    await loadFromHttpUrl(input)
+  } else {
+    await loadFromDirectory(input)
   }
 }
 
@@ -1140,50 +1147,43 @@ function getTableRowClassName({ row }) {
       title="打开日志源"
       width="600px"
       :close-on-click-modal="false">
-      <el-tabs v-model="sourceType" class="source-tabs">
-        <el-tab-pane label="HTTP 服务器" name="url">
-          <div class="tab-content">
-            <div class="content-description">
-              <el-icon :size="20"><Link /></el-icon>
-              <span>输入 HTTP 服务器上的日志目录 URL 地址</span>
-            </div>
-            <el-input
-              v-model="httpUrl"
-              placeholder="例如: http://logs.example.com/test-logs/"
-              :prefix-icon="Link"
-              clearable
-              size="large"
-              class="url-input"
-              @keyup.enter="handleSourceDialogEnter" />
-          </div>
-        </el-tab-pane>
-
-        <el-tab-pane label="本地文件夹" name="folder">
-          <div class="tab-content">
-            <div class="content-description">
-              <el-icon :size="20"><Folder /></el-icon>
-              <span>选择本地计算机上的日志文件夹路径</span>
-            </div>
-            <div class="folder-input-wrapper">
-              <el-input
-                v-model="selectedFolderPath"
-                placeholder="选择或输入本地文件夹路径"
-                :prefix-icon="Folder"
-                clearable
-                size="large"
-                class="folder-input"
-                @keyup.enter="handleSourceDialogEnter" />
-              <el-button
-                @click="selectLocalFolder"
-                :icon="FolderOpened"
-                size="large"
-                class="browse-btn">
-                浏览
-              </el-button>
-            </div>
-          </div>
-        </el-tab-pane>
-      </el-tabs>
+      <div class="log-source-content">
+        <div class="content-description">
+          <el-icon :size="20"><Link v-if="inputSourceType === 'url'" /><Folder v-else /></el-icon>
+          <span v-if="inputSourceType === 'url'">检测到 HTTP 服务器 URL</span>
+          <span v-else>输入文件夹路径或 HTTP URL</span>
+        </div>
+        <div class="source-input-wrapper">
+          <el-input
+            v-model="logSourceInput"
+            :placeholder="inputSourceType === 'url' ? '例如: http://logs.example.com/test-logs/' : '选择或输入本地文件夹路径，或输入 HTTP URL'"
+            :prefix-icon="inputSourceType === 'url' ? Link : Folder"
+            clearable
+            size="large"
+            class="log-source-input"
+            @keyup.enter="handleSourceDialogEnter" />
+          <el-button
+            v-if="inputSourceType === 'folder'"
+            @click="selectLocalFolder"
+            :icon="FolderOpened"
+            size="large"
+            class="browse-btn">
+            浏览
+          </el-button>
+        </div>
+        <div class="input-hint">
+          <el-text type="info" size="small">
+            <template v-if="logSourceInput.trim()">
+              <el-icon><InfoFilled /></el-icon>
+              <span v-if="inputSourceType === 'url'">将作为 HTTP 服务器 URL 处理</span>
+              <span v-else>将作为本地文件夹路径处理</span>
+            </template>
+            <template v-else>
+              输入 http:// 或 https:// 开头的地址将作为 HTTP URL，否则作为本地文件夹路径
+            </template>
+          </el-text>
+        </div>
+      </div>
 
       <template #footer>
         <el-button @click="showSourceDialog = false">取消</el-button>
@@ -1958,28 +1958,7 @@ function getTableRowClassName({ row }) {
 }
 
 /* Dialog Styles */
-.source-tabs {
-  margin-top: -12px;
-}
-
-.source-tabs :deep(.el-tabs__header) {
-  margin-bottom: 24px;
-}
-
-.source-tabs :deep(.el-tabs__nav-wrap::after) {
-  display: none;
-}
-
-.source-tabs :deep(.el-tabs__item) {
-  font-size: 15px;
-  padding: 0 24px;
-}
-
-.source-tabs :deep(.el-tabs__active-bar) {
-  height: 3px;
-}
-
-.tab-content {
+.log-source-content {
   padding: 0 8px;
 }
 
@@ -2005,22 +1984,22 @@ function getTableRowClassName({ row }) {
   line-height: 1.6;
 }
 
-.folder-input-wrapper {
+.source-input-wrapper {
   display: flex;
   gap: 12px;
   align-items: stretch;
 }
 
-.folder-input {
+.log-source-input {
   flex: 1;
   min-width: 0;
 }
 
-.folder-input :deep(.el-input__wrapper) {
+.log-source-input :deep(.el-input__wrapper) {
   width: 100%;
 }
 
-.folder-input :deep(.el-input__inner) {
+.log-source-input :deep(.el-input__inner) {
   width: 100%;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
 }
@@ -2031,17 +2010,18 @@ function getTableRowClassName({ row }) {
   font-weight: 500;
 }
 
-.url-input {
-  width: 100%;
+.input-hint {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.url-input :deep(.el-input__wrapper) {
-  width: 100%;
-}
-
-.url-input :deep(.el-input__inner) {
-  width: 100%;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+.input-hint .el-icon {
+  font-size: 14px;
 }
 
 .bookmark-info {
