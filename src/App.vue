@@ -2290,4 +2290,10 @@ function updatePinnedSize(size) {
   padding: 12px;
   border-radius: 4px;
 }
+
+/* Pinned Tooltip Popover Styles */
+.message-tooltip-popover.is-pinned {
+  position: fixed !important;
+  transform: none !important;
+}
 </style>

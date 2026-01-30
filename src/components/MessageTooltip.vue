@@ -7,6 +7,7 @@
     :show-after="200"
     :hide-after="100"
     popper-class="message-tooltip-popover"
+    :class="{ 'is-pinned': isPinned }"
     :popper-options="popperOptions">
     <template #reference>
       <span
@@ -1143,5 +1144,15 @@ onUnmounted(() => {
   bottom: 0;
   left: 0;
   cursor: nesw-resize;
+}
+
+/* Pinned state styles */
+.message-tooltip-popover.is-pinned {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  border: 2px solid #409EFF;
+}
+
+.message-tooltip-popover.is-pinned .tooltip-header {
+  background: linear-gradient(to bottom, #f5f7fa, #e8eef5);
 }
 </style>
