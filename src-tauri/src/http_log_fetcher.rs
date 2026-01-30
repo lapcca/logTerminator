@@ -49,8 +49,14 @@ pub struct HttpLogFetcher {
 impl HttpLogFetcher {
     /// Create a new HTTP log fetcher
     pub fn new(base_url: &str) -> Result<Self, HttpFetchError> {
-        let url = Url::parse(base_url)
+        let mut url = Url::parse(base_url)
             .map_err(|e| HttpFetchError::InvalidUrl(format!("{}: {}", base_url, e)))?;
+
+        // Ensure the URL path ends with '/' for proper directory listing
+        // If it doesn't end with '/', append it to avoid URL parsing issues
+        if !url.path().ends_with('/') {
+            url.set_path(&format!("{}/", url.path()));
+        }
 
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
@@ -73,8 +79,14 @@ impl HttpLogFetcher {
         let document = Html::parse_document(html);
         let link_selector = Selector::parse("a[href]").unwrap();
 
-        let base = Url::parse(base_url)
+        let mut base = Url::parse(base_url)
             .map_err(|e| HttpFetchError::InvalidUrl(format!("{}: {}", base_url, e)))?;
+
+        // Ensure the URL path ends with '/' for proper directory listing
+        // If it doesn't end with '/', append it to ensure relative links are resolved correctly
+        if !base.path().ends_with('/') {
+            base.set_path(&format!("{}/", base.path()));
+        }
 
         // Get the base path for filtering - ensure it ends with / for proper prefix matching
         let base_path = base.path().trim_end_matches('/');
