@@ -1057,15 +1057,32 @@ onMounted(() => {
   // Add resize event listeners
   document.addEventListener('mousemove', onMouseMove)
   document.addEventListener('mouseup', onMouseUp)
+  window.addEventListener('resize', handleWindowResize)
 })
 
 onUnmounted(() => {
   // Remove resize event listeners
   document.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('mouseup', onMouseUp)
+  window.removeEventListener('resize', handleWindowResize)
   // Remove dropdown close listeners
   removeDropdownCloseListeners()
 })
+
+// Handle window resize - clamp pinned tooltip to new bounds
+function handleWindowResize() {
+  if (!pinnedTooltip.value.visible) return
+
+  const maxX = window.innerWidth - pinnedTooltip.value.size.width
+  const maxY = window.innerHeight - pinnedTooltip.value.size.height - 64
+
+  if (pinnedTooltip.value.position.x > maxX) {
+    pinnedTooltip.value.position.x = Math.max(0, maxX)
+  }
+  if (pinnedTooltip.value.position.y > maxY) {
+    pinnedTooltip.value.position.y = Math.max(64, maxY)
+  }
+}
 
 // Watch currentSession and fetch log levels when it changes
 watch(currentSession, async (newSessionId) => {
