@@ -28,7 +28,7 @@
         <!-- Pin button (shown when not pinned) -->
         <el-button
           v-if="!isPinned"
-          :icon="PushPin"
+          :icon="Paperclip"
           size="small"
           class="pin-btn"
           @click.stop="handlePin"
@@ -148,14 +148,13 @@
         <div class="resize-handle sw" @mousedown="startResize($event, 'sw')"></div>
       </div>
     </div>
-    </div>
   </el-popover>
 </template>
 
 <script setup>
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Search, ArrowUp, ArrowDown, Rank, PushPin, Close } from '@element-plus/icons-vue'
+import { Search, ArrowUp, ArrowDown, Rank, Paperclip, Close } from '@element-plus/icons-vue'
 import { detectJson, syntaxHighlightJson, prettifyJson, getJsonSize, searchInJson } from '../utils/jsonViewer.js'
 
 const props = defineProps({
@@ -219,6 +218,19 @@ let dragState = {
   popperElement: null,
   positionLockObserver: null,
   rafId: null
+}
+
+// Resize state
+const MIN_SIZE = { width: 300, height: 200 }
+let resizeState = {
+  isResizing: false,
+  direction: null,
+  startX: 0,
+  startY: 0,
+  startWidth: 0,
+  startHeight: 0,
+  startLeft: 0,
+  startTop: 0
 }
 
 // Allow popper auto-positioning to avoid overflow
@@ -554,6 +566,101 @@ function resetDragState() {
   }
 }
 
+// Resize handlers
+function startResize(e, direction) {
+  if (!props.isPinned) return
+
+  e.preventDefault()
+  e.stopPropagation()
+
+  const popper = getPopperElement()
+  if (!popper) return
+
+  const rect = popper.getBoundingClientRect()
+
+  resizeState.isResizing = true
+  resizeState.direction = direction
+  resizeState.startX = e.clientX
+  resizeState.startY = e.clientY
+  resizeState.startWidth = rect.width
+  resizeState.startHeight = rect.height
+  resizeState.startLeft = rect.left
+  resizeState.startTop = rect.top
+
+  document.addEventListener('mousemove', handleResizeMove, { passive: false })
+  document.addEventListener('mouseup', handleResizeEnd)
+}
+
+function handleResizeMove(e) {
+  if (!resizeState.isResizing || !props.isPinned) return
+
+  const deltaX = e.clientX - resizeState.startX
+  const deltaY = e.clientY - resizeState.startY
+
+  let newWidth = resizeState.startWidth
+  let newHeight = resizeState.startHeight
+  let newX = currentPosition.value.x
+  let newY = currentPosition.value.y
+
+  // Calculate new size based on direction
+  if (resizeState.direction.includes('e')) {
+    newWidth = resizeState.startWidth + deltaX
+  }
+  if (resizeState.direction.includes('w')) {
+    newWidth = resizeState.startWidth - deltaX
+    newX = resizeState.startLeft + deltaX
+  }
+  if (resizeState.direction.includes('s')) {
+    newHeight = resizeState.startHeight + deltaY
+  }
+  if (resizeState.direction.includes('n')) {
+    newHeight = resizeState.startHeight - deltaY
+    newY = resizeState.startTop + deltaY
+  }
+
+  // Clamp to min/max
+  const maxWidth = window.innerWidth - newX
+  const maxHeight = window.innerHeight - newY - 64 // minus header
+
+  newWidth = Math.max(MIN_SIZE.width, Math.min(newWidth, maxWidth))
+  newHeight = Math.max(MIN_SIZE.height, Math.min(newHeight, maxHeight))
+
+  // Clamp position
+  newX = Math.max(0, Math.min(newX, window.innerWidth - newWidth))
+  newY = Math.max(64, Math.min(newY, window.innerHeight - newHeight))
+
+  currentSize.value = { width: newWidth, height: newHeight }
+  currentPosition.value = { x: newX, y: newY }
+
+  emit('size-update', currentSize.value)
+  emit('position-update', currentPosition.value)
+
+  applyPinnedPosition()
+}
+
+function handleResizeEnd() {
+  resizeState.isResizing = false
+  document.removeEventListener('mousemove', handleResizeMove)
+  document.removeEventListener('mouseup', handleResizeEnd)
+}
+
+function applyPinnedPosition() {
+  if (!props.isPinned) return
+
+  const popper = getPopperElement()
+  if (!popper) return
+
+  popper.style.setProperty('position', 'fixed', 'important')
+  popper.style.setProperty('left', `${currentPosition.value.x}px`, 'important')
+  popper.style.setProperty('top', `${currentPosition.value.y}px`, 'important')
+  popper.style.setProperty('width', `${currentSize.value.width}px`, 'important')
+  popper.style.setProperty('height', `${currentSize.value.height}px`, 'important')
+  popper.style.setProperty('right', 'auto', 'important')
+  popper.style.setProperty('bottom', 'auto', 'important')
+  popper.style.setProperty('transform', 'none', 'important')
+  popper.style.setProperty('margin', '0', 'important')
+}
+
 function getPopperElement() {
   if (dragState.popperElement) {
     // Check if still valid
@@ -730,6 +837,8 @@ watch(() => props.isPinned, (isPinned) => {
 onUnmounted(() => {
   document.removeEventListener('mousemove', handleDragMove)
   document.removeEventListener('mouseup', handleDragEnd)
+  document.removeEventListener('mousemove', handleResizeMove)
+  document.removeEventListener('mouseup', handleResizeEnd)
   unlockPosition()
   if (dragState.positionLockObserver) {
     dragState.positionLockObserver.disconnect()
