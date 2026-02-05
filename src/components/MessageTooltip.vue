@@ -235,7 +235,7 @@ let resizeState = {
 }
 
 // Allow popper auto-positioning to avoid overflow
-const popperOptions = {
+const popperOptions = computed(() => ({
   modifiers: [
     {
       name: 'preventOverflow',
@@ -260,8 +260,31 @@ const popperOptions = {
         gpuAcceleration: false, // Disable to prevent transform-based positioning
       },
     },
+    // Center the popover on screen (only when not pinned)
+    {
+      name: 'centerPopper',
+      enabled: !props.isPinned,
+      phase: 'beforeWrite',
+      fn: ({ state }) => {
+        const viewportWidth = window.innerWidth
+        const viewportHeight = window.innerHeight
+
+        // Get the popper's dimensions
+        const popperWidth = state.elements.popper.offsetWidth
+        const popperHeight = state.elements.popper.offsetHeight
+
+        // Calculate center position
+        const centerX = (viewportWidth - popperWidth) / 2
+        const centerY = (viewportHeight - popperHeight) / 2
+
+        // Set the position
+        state.styles.popper.left = `${centerX}px`
+        state.styles.popper.top = `${centerY}px`
+        state.styles.popper.transform = 'none'
+      },
+    },
   ],
-}
+}))
 
 // Computed
 const popoverWidth = computed(() => {
