@@ -28,9 +28,11 @@ import {
   DArrowLeft,
   DArrowRight,
   MoreFilled,
-  InfoFilled
+  InfoFilled,
+  WarningFilled
 } from '@element-plus/icons-vue'
 import MessageTooltip from './components/MessageTooltip.vue'
+import TestSelectionDialog from './components/TestSelectionDialog.vue'
 import { parsePythonStackTrace, getStackPreview, isPythonStackTrace } from './utils/stackParser.js'
 
 // Custom logTerminator icon component
@@ -237,6 +239,13 @@ const showEditBookmarkDialog = ref(false) // 控制编辑书签对话框显示
 const editingBookmark = ref(null) // 当前编辑的书签
 const editingBookmarkTitle = ref('') // 编辑时的临时标题
 
+// Test selection dialog
+const showTestSelectionDialog = ref(false)
+const testScanResults = ref([])
+const testScanLoading = ref(false)
+const pendingSourcePath = ref('')
+const pendingSourceIsHttp = ref(false)
+
 // Toggle functions
 function toggleBookmarksPanel() {
   showBookmarksPanel.value = !showBookmarksPanel.value
@@ -418,21 +427,80 @@ async function openLogSource() {
   showSourceDialog.value = false
 
   const input = logSourceInput.value.trim()
-  if (inputSourceType.value === 'url') {
-    await loadFromHttpUrl(input)
+  pendingSourcePath.value = input
+  pendingSourceIsHttp.value = inputSourceType.value === 'url'
+
+  await scanTests(input, inputSourceType.value === 'url')
+}
+
+// Scan for available tests
+async function scanTests(path, isHttp) {
+  testScanLoading.value = true
+  testScanResults.value = []
+
+  try {
+    let results
+    if (isHttp) {
+      results = await invoke('scan_log_http_url', { url: path })
+    } else {
+      results = await invoke('scan_log_directory', { directoryPath: path })
+    }
+    testScanResults.value = results
+
+    if (results.length === 0) {
+      alert(isHttp
+        ? '未找到符合格式的test日志文件'
+        : '未找到符合格式的test日志文件')
+      return
+    }
+
+    // Show test selection dialog
+    showTestSelectionDialog.value = true
+  } catch (error) {
+    console.error('Error scanning for tests:', error)
+    let userMsg = error
+    if (error.includes('InvalidUrl')) {
+      userMsg = 'URL格式无效，请输入有效的HTTP/HTTPS地址'
+    } else if (error.includes('Timeout')) {
+      userMsg = '请求超时，服务器可能响应缓慢'
+    } else if (error.includes('No test log files found')) {
+      userMsg = '未找到符合格式的test日志文件'
+    }
+    alert(`扫描失败：${userMsg}`)
+  } finally {
+    testScanLoading.value = false
+  }
+}
+
+// Handle test selection confirmation
+async function handleTestSelectionConfirm(selectedTests) {
+  console.log('[App] handleTestSelectionConfirm called with:', selectedTests)
+  console.log('[App] pendingSourcePath:', pendingSourcePath.value)
+  console.log('[App] pendingSourceIsHttp:', pendingSourceIsHttp.value)
+
+  showTestSelectionDialog.value = false
+
+  if (pendingSourceIsHttp.value) {
+    await loadFromHttpUrl(pendingSourcePath.value, selectedTests)
   } else {
-    await loadFromDirectory(input)
+    await loadFromDirectory(pendingSourcePath.value, selectedTests)
   }
 }
 
 // Load from HTTP URL
-async function loadFromHttpUrl(url) {
+async function loadFromHttpUrl(url, selectedTests) {
+  console.log('[loadFromHttpUrl] url:', url)
+  console.log('[loadFromHttpUrl] selectedTests:', selectedTests)
+  console.log('[loadFromHttpUrl] selectedTests type:', typeof selectedTests)
+  console.log('[loadFromHttpUrl] selectedTests isArray:', Array.isArray(selectedTests))
+
   loading.value = true
   loadingMessage.value = 'Connecting to server...'
   selectedEntryIds.value = []
 
   try {
-    const sessionIds = await invoke('parse_log_http_url', { url })
+    const sessionIds = await invoke('parse_log_http_url', { url, selectedTests })
+    console.log('[loadFromHttpUrl] sessionIds returned:', sessionIds)
     loadingMessage.value = `Found ${sessionIds.length} test session(s)`
 
     await loadSessions()
@@ -463,13 +531,19 @@ async function loadFromHttpUrl(url) {
 }
 
 // Load from local directory
-async function loadFromDirectory(directoryPath) {
+async function loadFromDirectory(directoryPath, selectedTests) {
+  console.log('[loadFromDirectory] directoryPath:', directoryPath)
+  console.log('[loadFromDirectory] selectedTests:', selectedTests)
+  console.log('[loadFromDirectory] selectedTests type:', typeof selectedTests)
+  console.log('[loadFromDirectory] selectedTests isArray:', Array.isArray(selectedTests))
+
   loading.value = true
   loadingMessage.value = 'Scanning directory...'
   selectedEntryIds.value = []
 
   try {
-    const sessionIds = await invoke('parse_log_directory', { directoryPath })
+    const sessionIds = await invoke('parse_log_directory', { directoryPath, selectedTests })
+    console.log('[loadFromDirectory] sessionIds returned:', sessionIds)
     loadingMessage.value = `Found ${sessionIds.length} test session(s)`
 
     await loadSessions()
@@ -1294,6 +1368,14 @@ function updatePinnedSize(size) {
         <el-button type="primary" @click="confirmEditBookmark">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- Test Selection Dialog -->
+    <TestSelectionDialog
+      v-model:visible="showTestSelectionDialog"
+      :scan-results="testScanResults"
+      :loading="testScanLoading"
+      :directory-path="pendingSourcePath"
+      @confirm="handleTestSelectionConfirm" />
 
     <!-- App Header -->
     <el-header class="app-header" :class="{ 'sidebar-collapsed': !showSidebar }">

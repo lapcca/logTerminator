@@ -5,7 +5,7 @@ pub mod log_parser;
 
 use crate::bookmark_utils::{create_auto_bookmark, find_auto_bookmark_markers};
 use crate::database::DatabaseManager;
-use crate::log_parser::{Bookmark, HtmlLogParser, LogEntry, TestSession};
+use crate::log_parser::{Bookmark, HtmlLogParser, LogEntry, ScanResult, TestSession};
 use std::sync::Mutex;
 use tauri::{Emitter, State};
 
@@ -20,10 +20,63 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+// Scan directory for test sessions without loading them
+#[tauri::command]
+fn scan_log_directory(
+    state: State<'_, AppState>,
+    directory_path: String,
+) -> Result<Vec<ScanResult>, String> {
+    println!("Scanning directory: {}", directory_path);
+
+    // Get existing sessions to check which tests are already loaded
+    let existing_sessions = {
+        let db_manager = state.db_manager.lock().unwrap();
+        db_manager.get_sessions()
+            .map_err(|e| format!("Failed to get existing sessions: {}", e))?
+    };
+
+    // Create a map of existing session names to their info
+    let mut existing_map: std::collections::HashMap<String, (String, usize)> = std::collections::HashMap::new();
+    for session in &existing_sessions {
+        if session.directory_path == directory_path {
+            existing_map.insert(session.name.clone(), (session.id.clone(), session.total_entries));
+        }
+    }
+
+    // Scan directory for test groups
+    let test_groups = HtmlLogParser::scan_html_files(&directory_path)
+        .map_err(|e| format!("Failed to scan directory: {}", e))?;
+
+    if test_groups.is_empty() {
+        return Err("No test log files found in the directory".to_string());
+    }
+
+    // Create scan results
+    let mut results = Vec::new();
+    for (test_name, html_files) in test_groups {
+        let (existing_session_id, estimated_entries) = existing_map
+            .get(&test_name)
+            .map(|(id, entries)| (Some(id.clone()), Some(*entries)))
+            .unwrap_or((None, None));
+
+        results.push(ScanResult {
+            test_name,
+            file_count: html_files.len(),
+            is_loaded: existing_session_id.is_some(),
+            existing_session_id,
+            estimated_entries,
+        });
+    }
+
+    println!("Scanned {} test sessions", results.len());
+    Ok(results)
+}
+
 // Helper function to do the actual parsing work (can run in blocking thread pool)
 fn parse_directory_blocking(
     db_path: String,
     directory_path: String,
+    selected_tests: Option<Vec<String>>,
 ) -> Result<Vec<(String, String, usize, usize)>, String> {
     println!("[BLOCKING] Starting to parse: {}", directory_path);
 
@@ -41,18 +94,66 @@ fn parse_directory_blocking(
 
     let mut session_results = Vec::new();
 
-    for (test_name, html_files) in test_groups {
+    // Filter tests if selected_tests is provided
+    let test_groups_to_parse: Vec<(String, Vec<String>)> = if let Some(selected) = selected_tests {
+        println!("[BLOCKING] Selected tests: {:?}", selected);
+        if selected.is_empty() {
+            return Err("No tests selected for loading".to_string());
+        }
+        let filtered: Vec<_> = test_groups
+            .into_iter()
+            .filter(|(name, _)| selected.contains(name))
+            .collect();
+        println!("[BLOCKING] Filtered to {} test groups", filtered.len());
+        filtered
+    } else {
+        println!("[BLOCKING] No selection filter, processing all tests");
+        test_groups.into_iter().collect()
+    };
+
+    if test_groups_to_parse.is_empty() {
+        return Err("No matching test sessions found for the selected tests".to_string());
+    }
+
+    for (test_name, html_files) in test_groups_to_parse {
         println!(
             "[BLOCKING] Processing test group: {} ({} files)",
             test_name,
             html_files.len()
         );
 
+        // Delete existing session with the same name and directory path if it exists
+        println!("[BLOCKING] Checking for existing session: name={}, dir={}", test_name, directory_path);
+
+        // Use a separate database connection for deletion to avoid borrow issues
+        let db_path_for_delete = "logterminator.db";
+        match DatabaseManager::new(db_path_for_delete) {
+            Ok(delete_db_manager) => {
+                match delete_db_manager.delete_session_by_name_and_path(&test_name, &directory_path) {
+                    Ok(Some(deleted_session_id)) => {
+                        println!("[BLOCKING] Deleted existing session: {}", deleted_session_id);
+                    }
+                    Ok(None) => {
+                        println!("[BLOCKING] No existing session found for {}", test_name);
+                    }
+                    Err(e) => {
+                        println!("[BLOCKING] Warning: Failed to delete existing session: {}", e);
+                        // Continue anyway - try to create the new session
+                    }
+                }
+            }
+            Err(e) => {
+                println!("[BLOCKING] Warning: Could not create database connection for deletion: {}", e);
+                // Continue anyway
+            }
+        }
+
         let session_id = format!(
             "session_{}_{}",
             test_name.replace(|c: char| !c.is_alphanumeric() && c != '_', "_"),
             chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
         );
+        println!("[BLOCKING] Generated new session_id: {}", session_id);
 
         let mut all_entries = Vec::new();
         let mut total_entries = 0;
@@ -74,6 +175,7 @@ fn parse_directory_blocking(
             continue;
         }
 
+        println!("[BLOCKING] Creating session: id={}, name={}", session_id, test_name);
         let session = TestSession {
             id: session_id.clone(),
             name: test_name.clone(),
@@ -88,10 +190,12 @@ fn parse_directory_blocking(
         db_manager
             .create_test_session(&session)
             .map_err(|e| format!("Failed to create session: {}", e))?;
+        println!("[BLOCKING] Session created successfully in database");
 
         let inserted_ids = db_manager
             .insert_entries(&all_entries)
             .map_err(|e| format!("Failed to insert entries: {}", e))?;
+        println!("[BLOCKING] Inserted {} entries into database", inserted_ids.len());
 
         // Assign IDs to entries for auto-bookmark detection
         let mut entries_with_ids = all_entries;
@@ -129,6 +233,11 @@ fn parse_directory_blocking(
         session_results.push((session_id, test_name, html_files.len(), total_entries));
     }
 
+    println!("[BLOCKING] Total session results: {}", session_results.len());
+    for (id, name, files, entries) in &session_results {
+        println!("[BLOCKING] - Session: id={}, name={}, files={}, entries={}", id, name, files, entries);
+    }
+
     if session_results.is_empty() {
         return Err("No valid test sessions were created".to_string());
     }
@@ -141,8 +250,10 @@ fn parse_directory_blocking(
 async fn parse_log_directory(
     _state: State<'_, AppState>,
     directory_path: String,
+    selected_tests: Option<Vec<String>>,
 ) -> Result<Vec<String>, String> {
     println!("Starting async parse for: {}", directory_path);
+    println!("selected_tests: {:?}", selected_tests);
 
     let db_path = "logterminator.db".to_string();
 
@@ -150,7 +261,7 @@ async fn parse_log_directory(
 
     // Run blocking work in thread pool
     let result =
-        tokio::task::spawn_blocking(move || parse_directory_blocking(db_path, directory_path))
+        tokio::task::spawn_blocking(move || parse_directory_blocking(db_path, directory_path, selected_tests))
             .await
             .map_err(|e| format!("Task failed: {:?}", e))?;
 
@@ -159,12 +270,41 @@ async fn parse_log_directory(
     result.map(|sessions| sessions.into_iter().map(|(id, _, _, _)| id).collect())
 }
 
+// Scan HTTP URL for test sessions without loading them
+#[tauri::command]
+async fn scan_log_http_url(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<Vec<ScanResult>, String> {
+    println!("Scanning HTTP URL: {}", url);
+
+    // Get existing sessions to check which tests are already loaded
+    let existing_sessions = {
+        let db_manager = state.db_manager.lock().unwrap();
+        db_manager.get_sessions()
+            .map_err(|e| format!("Failed to get existing sessions: {}", e))?
+    };
+
+    // Use spawn_blocking to avoid blocking async runtime
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    std::thread::spawn(move || {
+        let result = crate::http_log_fetcher::scan_http_url(url, &existing_sessions);
+        let _ = tx.send(result);
+    });
+
+    rx.await
+        .map_err(|e| format!("Join error: {}", e))?
+        .map_err(|e| e.to_string())
+}
+
 // Parse logs from HTTP server and create test sessions
 #[tauri::command]
 async fn parse_log_http_url(
     _state: State<'_, AppState>,
     window: tauri::Window,
     url: String,
+    selected_tests: Option<Vec<String>>,
 ) -> Result<Vec<String>, String> {
     println!("Starting async HTTP parse for: {}", url);
 
@@ -183,6 +323,7 @@ async fn parse_log_http_url(
             |msg| {
                 let _ = window_clone.emit("http-progress", msg);
             },
+            selected_tests,
         );
         let _ = tx.send(result);
     });
@@ -335,6 +476,8 @@ pub fn run() {
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             greet,
+            scan_log_directory,
+            scan_log_http_url,
             parse_log_directory,
             parse_log_http_url,
             get_log_entries,

@@ -313,15 +313,69 @@ impl DatabaseManager {
     }
 
     pub fn delete_session(&self, session_id: &str) -> SqlResult<()> {
-        // Delete in correct order due to foreign key constraints
-        self.conn.execute("DELETE FROM bookmarks WHERE log_entry_id IN (SELECT id FROM log_entries WHERE test_session_id = ?)", [session_id])?;
-        self.conn.execute(
-            "DELETE FROM log_entries WHERE test_session_id = ?",
-            [session_id],
-        )?;
-        self.conn
-            .execute("DELETE FROM test_sessions WHERE id = ?", [session_id])?;
+        println!("[DB] Starting delete_session for id={}", session_id);
+
+        // Use transaction for atomicity
+        let tx = self.conn.unchecked_transaction()?;
+
+        {
+            // First, get all log_entry_ids for this session
+            let mut stmt = tx.prepare("SELECT id FROM log_entries WHERE test_session_id = ?")?;
+            let entry_ids: Vec<i64> = stmt.query_map([session_id], |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            println!("[DB] Found {} log entries to delete", entry_ids.len());
+
+            // Delete bookmarks for each entry
+            if !entry_ids.is_empty() {
+                for entry_id in &entry_ids {
+                    tx.execute("DELETE FROM bookmarks WHERE log_entry_id = ?", [entry_id])?;
+                }
+                println!("[DB] Deleted bookmarks for {} entries", entry_ids.len());
+            }
+
+            // Delete log entries
+            tx.execute(
+                "DELETE FROM log_entries WHERE test_session_id = ?",
+                [session_id],
+            )?;
+            println!("[DB] Deleted log entries for session");
+
+            // Delete the session
+            tx.execute("DELETE FROM test_sessions WHERE id = ?", [session_id])?;
+            println!("[DB] Deleted session record");
+        } // stmt is dropped here
+
+        tx.commit()?;
+        println!("[DB] Transaction committed");
+
         Ok(())
+    }
+
+    /// Find and delete a session with the same name and directory path
+    /// Returns the session_id of the deleted session, if any
+    pub fn delete_session_by_name_and_path(&self, name: &str, directory_path: &str) -> SqlResult<Option<String>> {
+        println!("[DB] delete_session_by_name_and_path: name={}, dir={}", name, directory_path);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT id FROM test_sessions WHERE name = ? AND directory_path = ?"
+        )?;
+
+        let session_id_opt = stmt.query_row(params![name, directory_path], |row| {
+            row.get::<_, String>(0)
+        }).optional()?;
+
+        match &session_id_opt {
+            Some(id) => println!("[DB] Found existing session: {}", id),
+            None => println!("[DB] No existing session found"),
+        }
+
+        if let Some(session_id) = session_id_opt {
+            self.delete_session(&session_id)?;
+            Ok(Some(session_id))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn delete_bookmark(&self, bookmark_id: i64) -> SqlResult<()> {

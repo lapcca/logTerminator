@@ -40,6 +40,24 @@ pub struct TestSession {
     pub source_type: Option<String>,
 }
 
+/// Result of scanning a directory or HTTP URL for test sessions
+/// Contains metadata about test sessions without loading the actual log entries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanResult {
+    /// Name of the test session (e.g., "TestEnableTcpdump_ID_1")
+    pub test_name: String,
+    /// Number of HTML files associated with this test
+    pub file_count: usize,
+    /// Whether this test session has already been loaded into the database
+    pub is_loaded: bool,
+    /// If already loaded, the existing session ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub existing_session_id: Option<String>,
+    /// If already loaded, the number of log entries in the existing session
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_entries: Option<usize>,
+}
+
 pub struct HtmlLogParser;
 
 impl HtmlLogParser {
@@ -51,7 +69,32 @@ impl HtmlLogParser {
         println!("Parsing file: {}", file_path);
 
         let content = std::fs::read_to_string(file_path)?;
-        let document = Html::parse_document(&content);
+        println!("  File content loaded: {} bytes", content.len());
+
+        // Parse the HTML content
+        let entries = Self::parse_content(&content, file_path, test_session_id, file_index)?;
+
+        println!("  Total parsed {} entries", entries.len());
+        Ok(entries)
+    }
+
+    // Helper function to parse HTML content
+    fn parse_content(
+        content: &str,
+        file_path: &str,
+        test_session_id: &str,
+        file_index: usize,
+    ) -> Result<Vec<LogEntry>, Box<dyn std::error::Error>> {
+        println!("  Starting HTML parsing...");
+
+        let document = std::panic::catch_unwind(|| {
+            Html::parse_document(content)
+        }).map_err(|e| {
+            println!("  PANIC in Html::parse_document: {:?}", e);
+            format!("Panic during HTML parsing: {:?}", e)
+        })?;
+
+        println!("  HTML document parsed, extracting entries...");
 
         // Select table rows
         let row_selector = Selector::parse("table tr").ok();
@@ -105,6 +148,10 @@ impl HtmlLogParser {
             if timestamp_text.is_empty() || timestamp_text == "Timestamp" {
                 line_number += 1;
                 continue;
+            }
+
+            if line_number % 500 == 0 && line_number > 0 {
+                println!("  Parsed {} rows, {} entries so far", line_number, entries.len());
             }
 
             // Extract level from td.level and remove surrounding brackets
@@ -186,9 +233,43 @@ impl HtmlLogParser {
         test_session_id: &str,
         file_index: usize,
     ) -> Result<Vec<LogEntry>, Box<dyn std::error::Error>> {
-        println!("Parsing HTML from URL: {}", file_url);
+        println!("Parsing HTML from URL: {} (content length: {})", file_url, html_content.len());
 
-        let document = Html::parse_document(html_content);
+        // For large files (>5MB), save to temp file and use parse_file to avoid memory issues
+        if html_content.len() > 5 * 1024 * 1024 {
+            println!("  Large file detected (>5MB), using temp file approach...");
+
+            // Create a temporary file
+            let temp_dir = std::env::temp_dir();
+            let temp_file = temp_dir.join(format!("temp_log_{}_{:x}.html",
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs(),
+                std::process::id()
+            ));
+
+            println!("  Writing to temp file: {:?}", temp_file);
+            std::fs::write(&temp_file, html_content)?;
+            println!("  Temp file written successfully");
+
+            // Parse using the file-based method
+            println!("  Parsing from temp file...");
+            let result = Self::parse_file(temp_file.to_str().unwrap_or("temp.html"), test_session_id, file_index);
+
+            // Clean up temp file
+            let _ = std::fs::remove_file(&temp_file);
+            println!("  Temp file removed");
+
+            return result;
+        }
+
+        // Use catch_unwind to capture any panics during HTML parsing
+        let document = std::panic::catch_unwind(|| {
+            println!("  Starting HTML document parsing...");
+            Html::parse_document(html_content)
+        }).map_err(|e| {
+            println!("  PANIC during HTML parsing: {:?}", e);
+            format!("Panic during HTML parsing: {:?}", e)
+        })?;
+        println!("  HTML document parsed successfully");
 
         // Select table rows
         let row_selector = Selector::parse("table tr").ok();
@@ -242,6 +323,10 @@ impl HtmlLogParser {
             if timestamp_text.is_empty() || timestamp_text == "Timestamp" {
                 line_number += 1;
                 continue;
+            }
+
+            if line_number % 500 == 0 && line_number > 0 {
+                println!("  Parsed {} rows, {} entries so far", line_number, entries.len());
             }
 
             // Extract level from td.level and remove surrounding brackets
