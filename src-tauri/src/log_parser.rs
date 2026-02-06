@@ -429,7 +429,9 @@ impl HtmlLogParser {
 
         let test_name_part = &filename[..dash_pos];
 
-        let id_pos = test_name_part.rfind("_ID_")?;
+        let id_pos = test_name_part
+            .rfind("_ID_")
+            .or_else(|| test_name_part.rfind("_AXID_"))?;
         if id_pos == 0 {
             return None;
         }

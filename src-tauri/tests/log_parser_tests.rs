@@ -32,6 +32,14 @@ mod tests {
             HtmlLogParser::is_test_log_file("TestABC_ID_1---10.html"),
             Some("TestABC_ID_1".to_string())
         );
+        assert_eq!(
+            HtmlLogParser::is_test_log_file("post_fs_snap_clone_AXID_5_---0.html"),
+            Some("post_fs_snap_clone_AXID_5_".to_string())
+        );
+        assert_eq!(
+            HtmlLogParser::is_test_log_file("verify_nas_fs_properties_permutation_AXID_4_---1.html"),
+            Some("verify_nas_fs_properties_permutation_AXID_4_".to_string())
+        );
     }
 
     #[test]
