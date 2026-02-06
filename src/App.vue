@@ -259,6 +259,9 @@ const options = reactive({
   sortDesc: [false]
 })
 
+// 跟踪当前页码（用于分页滚动）
+const currentPageForScroll = ref(1)
+
 // Items per page options
 const itemsPerPageOptions = [
   { title: '25 条/页', value: 25 },
@@ -853,6 +856,7 @@ function handlePagination() {
 function goToPage(page) {
   if (page >= 1 && page <= totalPages.value) {
     options.page = page
+    currentPageForScroll.value = page
     refreshLogs()
   }
 }
@@ -895,6 +899,7 @@ function debouncedSearch() {
   clearTimeout(searchTimeout)
   searchTimeout = setTimeout(() => {
     options.page = 1
+    currentPageForScroll.value = 1
     refreshLogs()
   }, 300)
 }
@@ -1079,6 +1084,7 @@ async function jumpToBookmark(bookmark) {
     // Navigate to the correct page
     if (entryPage !== options.page) {
       options.page = entryPage
+      currentPageForScroll.value = entryPage
       await refreshLogs()
       // Wait for render then highlight
       await nextTick()
@@ -1221,16 +1227,75 @@ const tableHeight = computed(() => {
   return showSidebar.value ? 'calc(100vh - 208px)' : 'calc(100vh - 88px)'
 })
 
-// Handle page change
-function handlePageChange(page) {
+// Handle page change with smart scroll behavior
+async function handlePageChange(page) {
+  // 先保存旧页码（使用独立的 ref 来跟踪，因为 Element Plus 会在触发事件前更新 options.page）
+  const oldPage = currentPageForScroll.value
+  console.log('[handlePageChange] oldPage:', oldPage, 'newPage:', page, 'page type:', typeof page)
+
+  const isNewPageNext = page > oldPage
+  const isNewPagePrev = page < oldPage
+
+  console.log('[handlePageChange] Comparison:', page, '>', oldPage, '=', isNewPageNext, page, '<', oldPage, '=', isNewPagePrev)
+
+  // 更新页码
   options.page = page
-  refreshLogs()
+  // 同步更新跟踪页码
+  currentPageForScroll.value = page
+
+  console.log('[handlePageChange] Updated options.page to:', options.page)
+
+  // 先加载新页数据
+  await refreshLogs()
+
+  console.log('[handlePageChange] Data loaded, waiting for DOM update...')
+
+  // 等待DOM更新后滚动
+  nextTick(() => {
+    console.log('[handlePageChange] nextTick executed, options.page is now:', options.page)
+
+    requestAnimationFrame(() => {
+      // 尝试多种方式查找滚动容器
+      let scrollContainer = document.querySelector('.el-table__body-wrapper')
+      if (scrollContainer) {
+        const innerWrap = scrollContainer.querySelector('.el-scrollbar__wrap')
+        const scrollBar = scrollContainer.querySelector('.el-scrollbar')
+        if (innerWrap) {
+          scrollContainer = innerWrap
+        } else if (scrollBar) {
+          scrollContainer = scrollBar
+        }
+      }
+
+      console.log('[handlePageChange] scrollContainer:', scrollContainer)
+
+      if (!scrollContainer) {
+        console.log('[handlePageChange] No scroll container found!')
+        return
+      }
+
+      const scrollHeight = scrollContainer.scrollHeight
+
+      if (isNewPageNext) {
+        // 下一页：始终滚动到顶部
+        console.log('[handlePageChange] Next page - scrolling to top, scrollHeight:', scrollHeight)
+        scrollContainer.scrollTop = 0
+      } else if (isNewPagePrev) {
+        // 上一页：始终滚动到底部
+        console.log('[handlePageChange] Previous page - scrolling to bottom, scrollHeight:', scrollHeight)
+        scrollContainer.scrollTop = scrollHeight
+      } else {
+        console.log('[handlePageChange] Same page - no scroll needed')
+      }
+    })
+  })
 }
 
 // Handle page size change
 function handleSizeChange(size) {
   options.itemsPerPage = size
   options.page = 1
+  currentPageForScroll.value = 1
   refreshLogs()
 }
 
@@ -1522,7 +1587,7 @@ function updatePinnedSize(size) {
                             :key="bookmark[0]?.id"
                             class="bookmark-item"
                             @click="jumpToBookmark(bookmark)">
-                            <el-avatar :size="32" class="bookmark-avatar">
+                            <el-avatar :size="20" class="bookmark-avatar">
                               <el-icon><StarFilled /></el-icon>
                             </el-avatar>
                             <span class="bookmark-time">{{ extractTimeFromTimestamp(bookmark[1]?.timestamp) }}</span>
@@ -1894,11 +1959,12 @@ function updatePinnedSize(size) {
 .bookmark-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 8px;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background-color 0.2s ease;
+  min-height: 28px;
 }
 
 .bookmark-item:hover {
@@ -1912,25 +1978,41 @@ function updatePinnedSize(size) {
 }
 
 .bookmark-time {
-  font-size: 13px;
-  color: #606266;
+  font-size: 12px;
+  color: #909399;
   white-space: nowrap;
   flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  line-height: 1;
 }
 
 .bookmark-title {
   flex: 1;
-  font-size: 14px;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1;
+  margin: 0;
+  padding: 0;
 }
 
 .bookmark-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   opacity: 0;
   transition: opacity 0.2s ease;
+}
+
+.bookmark-actions :deep(.el-button) {
+  padding: 2px 4px;
+  height: 20px;
+  margin: 0;
+}
+
+.bookmark-actions :deep(.el-button .el-icon) {
+  font-size: 12px;
 }
 
 .bookmark-item:hover .bookmark-actions {
