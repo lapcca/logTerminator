@@ -15,6 +15,7 @@
         "title": "logTerminator",
         "width": 1400,
         "height": 900,
+        "maximized": true,
         "minWidth": 800,
         "minHeight": 600
       }

@@ -194,8 +194,10 @@ const levelSelectRef = ref(null) // Ref for level filter select dropdown
 // Pinned tooltip state
 const pinnedTooltip = ref({
   visible: false,
+  rowId: null,
   message: '',
   hasJson: false,
+  viewMode: 'raw',
   position: { x: 0, y: 0 },
   size: { width: 600, height: 400 }
 })
@@ -1173,7 +1175,7 @@ function getTableRowClassName({ row }) {
 }
 
 // Handle pin request from MessageTooltip
-function handleTooltipPin(data) {
+function handleTooltipPin(rowId, data) {
   // Close existing pinned tooltip if any
   if (pinnedTooltip.value.visible) {
     closePinnedTooltip()
@@ -1182,8 +1184,10 @@ function handleTooltipPin(data) {
   // Set new pinned tooltip
   pinnedTooltip.value = {
     visible: true,
+    rowId,
     message: data.message,
     hasJson: data.hasJson,
+    viewMode: data.viewMode || 'raw',
     position: data.position,
     size: data.size
   }
@@ -1192,15 +1196,18 @@ function handleTooltipPin(data) {
 // Close pinned tooltip
 function closePinnedTooltip() {
   pinnedTooltip.value.visible = false
+  pinnedTooltip.value.rowId = null
 }
 
 // Update pinned tooltip position
 function updatePinnedPosition(pos) {
+  if (!pinnedTooltip.value.visible) return
   pinnedTooltip.value.position = pos
 }
 
 // Update pinned tooltip size
 function updatePinnedSize(size) {
+  if (!pinnedTooltip.value.visible) return
   pinnedTooltip.value.size = size
 }
 </script>
@@ -1566,9 +1573,17 @@ function updatePinnedSize(size) {
                     <div class="message-cell-wrapper">
                       <MessageTooltip
                         :message="row.message"
+                        :is-pinned="pinnedTooltip.visible && pinnedTooltip.rowId === row.id"
+                        :initial-position="pinnedTooltip.position"
+                        :initial-view-mode="pinnedTooltip.viewMode"
+                        :initial-size="pinnedTooltip.size"
                         :useDialogForLargeJson="true"
                         :largeJsonThreshold="2"
-                        @json-detected="(data) => handleJsonDetected(row.id, data)" />
+                        @json-detected="(data) => handleJsonDetected(row.id, data)"
+                        @pin="(data) => handleTooltipPin(row.id, data)"
+                        @close="closePinnedTooltip"
+                        @position-update="updatePinnedPosition"
+                        @size-update="updatePinnedSize" />
                     </div>
                   </template>
                 </el-table-column>
@@ -1602,17 +1617,6 @@ function updatePinnedSize(size) {
       </div>
     </el-main>
 
-    <!-- Pinned Tooltip Container -->
-    <div v-if="pinnedTooltip.visible" class="pinned-tooltip-container">
-      <MessageTooltip
-        :message="pinnedTooltip.message"
-        :is-pinned="true"
-        :initial-position="pinnedTooltip.position"
-        :initial-size="pinnedTooltip.size"
-        @close="closePinnedTooltip"
-        @position-update="updatePinnedPosition"
-        @size-update="updatePinnedSize" />
-    </div>
   </div>
 </template>
 
@@ -2245,10 +2249,6 @@ function updatePinnedSize(size) {
 .pinned-tooltip-container {
   position: fixed;
   z-index: 2000;
-  pointer-events: none;
-}
-
-.pinned-tooltip-container :deep(.el-popover) {
   pointer-events: auto;
 }
 </style>

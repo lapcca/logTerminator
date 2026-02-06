@@ -1,44 +1,16 @@
 <template>
-  <el-popover
-    ref="popoverRef"
-    :width="popoverWidth"
-    placement="auto"
-    trigger="hover"
-    :show-after="200"
-    :hide-after="100"
-    popper-class="message-tooltip-popover"
-    :class="{ 'is-pinned': isPinned }"
-    :popper-options="popperOptions">
-    <template #reference>
-      <span
-        ref="triggerRef"
-        class="message-tooltip-trigger"
-        :class="{ 'has-json': hasJson }"
-        @mouseenter="handleMouseEnter">
-        {{ truncatedMessage }}
-      </span>
-    </template>
-
-    <div class="message-tooltip-content">
+  <!-- Pinned mode: render as fixed div -->
+  <teleport v-if="isPinned" to="body">
+    <div class="pinned-tooltip-wrapper" :style="pinnedWrapperStyle">
+      <div class="message-tooltip-content">
       <!-- Header with drag handle, toggle and copy buttons -->
       <div class="tooltip-header" @mousedown="handleDragStart">
         <div class="drag-handle">
           <el-icon><Rank /></el-icon>
         </div>
 
-        <!-- Pin button (shown when not pinned) -->
-        <el-button
-          v-if="!isPinned"
-          :icon="Paperclip"
-          size="small"
-          class="pin-btn"
-          @click.stop="handlePin"
-          title="固定悬浮框">
-        </el-button>
-
         <!-- Close button (shown when pinned) -->
         <el-button
-          v-if="isPinned"
           :icon="Close"
           size="small"
           class="close-btn"
@@ -120,7 +92,7 @@
       <div class="tooltip-body" :style="{ maxHeight: popoverHeight }">
         <!-- Raw view -->
         <div v-if="viewMode === 'raw'" class="raw-view">
-          <pre class="message-text">{{ message }}</pre>
+          <pre class="message-text pinned-raw-text" style="font-weight: 400 !important; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-synthesis: none;"><span class="raw-text">{{ message }}</span></pre>
         </div>
 
         <!-- JSON view -->
@@ -135,7 +107,7 @@
       </div>
 
       <!-- Resize handles (only for pinned tooltips) -->
-      <div v-if="isPinned" class="resize-handles">
+      <div class="resize-handles">
         <!-- Edges -->
         <div class="resize-handle n" @mousedown="startResize($event, 'n')"></div>
         <div class="resize-handle s" @mousedown="startResize($event, 's')"></div>
@@ -147,6 +119,134 @@
         <div class="resize-handle nw" @mousedown="startResize($event, 'nw')"></div>
         <div class="resize-handle se" @mousedown="startResize($event, 'se')"></div>
         <div class="resize-handle sw" @mousedown="startResize($event, 'sw')"></div>
+      </div>
+    </div>
+  </div>
+  </teleport>
+
+  <!-- Hover mode: render as popover -->
+  <el-popover
+    v-else
+    ref="popoverRef"
+    :width="popoverWidth"
+    placement="auto"
+    trigger="hover"
+    :show-after="200"
+    :hide-after="100"
+    popper-class="message-tooltip-popover"
+    :popper-options="popperOptions">
+    <template #reference>
+      <span
+        ref="triggerRef"
+        class="message-tooltip-trigger"
+        :class="{ 'has-json': hasJson }"
+        @mouseenter="handleMouseEnter">
+        {{ truncatedMessage }}
+      </span>
+    </template>
+
+    <div class="message-tooltip-content">
+      <!-- Header with drag handle, toggle and copy buttons -->
+      <div class="tooltip-header" @mousedown="handleDragStart">
+        <div class="drag-handle">
+          <el-icon><Rank /></el-icon>
+        </div>
+
+        <!-- Pin button (shown when not pinned) -->
+        <el-button
+          :icon="Paperclip"
+          size="small"
+          class="pin-btn"
+          @click.stop="handlePin"
+          title="固定悬浮框">
+        </el-button>
+
+        <div class="view-toggles">
+          <el-button
+            :type="viewMode === 'raw' ? 'primary' : 'default'"
+            size="small"
+            @click.stop="viewMode = 'raw'">
+            Raw
+          </el-button>
+          <el-button
+            :type="viewMode === 'json' ? 'primary' : 'default'"
+            size="small"
+            :disabled="!hasJson"
+            @click.stop="viewMode = 'json'">
+            JSON
+          </el-button>
+        </div>
+        <div class="copy-buttons">
+          <el-button
+            size="small"
+            @click.stop="copyRaw">
+            Copy Raw
+          </el-button>
+          <el-button
+            size="small"
+            :disabled="!hasJson"
+            @click.stop="copyJson">
+            Copy JSON
+          </el-button>
+        </div>
+      </div>
+
+      <!-- Search bar (for JSON view) -->
+      <div v-if="viewMode === 'json' && hasJson" class="search-bar">
+        <div class="search-input-wrapper">
+          <el-input
+            v-model="searchTerm"
+            placeholder="Search keys/values... (Enter for next match)"
+            size="small"
+            clearable
+            @input="handleSearch"
+            @keyup.enter="handleSearchEnter"
+            @focus="handleInputFocus">
+            <template #prefix>
+              <el-icon><Search /></el-icon>
+            </template>
+          </el-input>
+        </div>
+        <div v-if="searchResults.length > 0" class="search-nav">
+          <span class="search-results-info">
+            Found {{ searchResults.length }} match(es)
+          </span>
+          <span v-if="searchResults.length > 0" class="search-counter">
+            ({{ currentMatchIndex + 1 }}/{{ searchResults.length }})
+          </span>
+          <div class="nav-buttons">
+            <el-button
+              size="small"
+              :disabled="searchResults.length === 0"
+              @click="navigateMatch(-1)">
+              <el-icon><ArrowUp /></el-icon>
+            </el-button>
+            <el-button
+              size="small"
+              :disabled="searchResults.length === 0"
+              @click="navigateMatch(1)">
+              <el-icon><ArrowDown /></el-icon>
+            </el-button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content area -->
+      <div class="tooltip-body" :style="{ maxHeight: popoverHeight }">
+        <!-- Raw view -->
+        <div v-if="viewMode === 'raw'" class="raw-view">
+          <pre class="message-text" :style="isPinned ? pinnedRawInlineStyle : null"><span class="raw-text">{{ message }}</span></pre>
+        </div>
+
+        <!-- JSON view -->
+        <div v-else class="json-view" ref="jsonViewRef">
+          <div v-if="jsonError" class="json-error">
+            Invalid JSON: {{ jsonError }}
+          </div>
+          <div v-else class="json-content">
+            <div v-html="displayJson" ref="jsonContentRef"></div>
+          </div>
+        </div>
       </div>
     </div>
   </el-popover>
@@ -162,6 +262,10 @@ const props = defineProps({
   message: {
     type: String,
     default: ''
+  },
+  initialViewMode: {
+    type: String,
+    default: 'raw'
   },
   useDialogForLargeJson: {
     type: Boolean,
@@ -319,6 +423,32 @@ const truncatedMessage = computed(() => {
   // Return full message - let CSS handle truncation with text-overflow: ellipsis
   return props.message
 })
+
+const pinnedWrapperStyle = computed(() => {
+  if (!props.isPinned) {
+    return {}
+  }
+  return {
+    position: 'fixed',
+    left: `${currentPosition.value.x}px`,
+    top: `${currentPosition.value.y}px`,
+    width: `${currentSize.value.width}px`,
+    height: `${currentSize.value.height}px`,
+    zIndex: 2000,
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
+    borderRadius: '6px',
+    backgroundColor: 'white',
+    border: '1px solid #dcdfe6',
+    display: 'flex',
+    flexDirection: 'column',
+    pointerEvents: 'auto',
+    fontWeight: '400',
+    fontSynthesis: 'none'
+  }
+})
+
+const pinnedRawInlineStyle =
+  "font-weight: 400 !important; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-synthesis: none;"
 
 // Methods
 function estimateJsonHeight(obj, depth = 0) {
@@ -517,6 +647,7 @@ function handlePin() {
   emit('pin', {
     message: props.message,
     hasJson: hasJson.value,
+    viewMode: viewMode.value,
     position: { x: rect.left, y: rect.top },
     size: { width: rect.width, height: rect.height }
   })
@@ -591,19 +722,14 @@ function startResize(e, direction) {
   e.preventDefault()
   e.stopPropagation()
 
-  const popper = getPopperElement()
-  if (!popper) return
-
-  const rect = popper.getBoundingClientRect()
-
   resizeState.isResizing = true
   resizeState.direction = direction
   resizeState.startX = e.clientX
   resizeState.startY = e.clientY
-  resizeState.startWidth = rect.width
-  resizeState.startHeight = rect.height
-  resizeState.startLeft = rect.left
-  resizeState.startTop = rect.top
+  resizeState.startWidth = currentSize.value.width
+  resizeState.startHeight = currentSize.value.height
+  resizeState.startLeft = currentPosition.value.x
+  resizeState.startTop = currentPosition.value.y
 
   document.addEventListener('mousemove', handleResizeMove, { passive: false })
   document.addEventListener('mouseup', handleResizeEnd, { passive: false })
@@ -617,12 +743,12 @@ function handleResizeMove(e) {
 
   let newWidth = resizeState.startWidth
   let newHeight = resizeState.startHeight
-  let newX = currentPosition.value.x
-  let newY = currentPosition.value.y
+  let newX = resizeState.startLeft
+  let newY = resizeState.startTop
 
   // Calculate max bounds based on current position before applying changes
-  const maxWidth = window.innerWidth - currentPosition.value.x
-  const maxHeight = window.innerHeight - currentPosition.value.y - HEADER_HEIGHT
+  const maxWidth = window.innerWidth - resizeState.startLeft
+  const maxHeight = window.innerHeight - resizeState.startTop - HEADER_HEIGHT
 
   // Calculate new size based on direction
   if (resizeState.direction.includes('e')) {
@@ -630,16 +756,14 @@ function handleResizeMove(e) {
   }
   if (resizeState.direction.includes('w')) {
     newWidth = resizeState.startWidth - deltaX
-    // Use current position as starting point, not startLeft
-    newX = currentPosition.value.x + deltaX
+    newX = resizeState.startLeft + deltaX
   }
   if (resizeState.direction.includes('s')) {
     newHeight = resizeState.startHeight + deltaY
   }
   if (resizeState.direction.includes('n')) {
     newHeight = resizeState.startHeight - deltaY
-    // Use current position as starting point, not startTop
-    newY = currentPosition.value.y + deltaY
+    newY = resizeState.startTop + deltaY
   }
 
   // Clamp to min/max
@@ -767,20 +891,29 @@ function handleDragStart(e) {
   // Only allow dragging from header
   if (!e.target.closest('.tooltip-header')) return
 
-  const popper = getPopperElement()
-  if (!popper) {
-    console.warn('Could not find popper element')
-    return
+  // For pinned mode, use current position; for hover mode, get popper element
+  if (props.isPinned) {
+    dragState.isDragging = true
+    dragState.startX = e.clientX - currentPosition.value.x
+    dragState.startY = e.clientY - currentPosition.value.y
+    dragState.currentX = currentPosition.value.x
+    dragState.currentY = currentPosition.value.y
+  } else {
+    const popper = getPopperElement()
+    if (!popper) {
+      console.warn('Could not find popper element')
+      return
+    }
+
+    dragState.isDragging = true
+    dragState.popperElement = popper
+
+    const rect = popper.getBoundingClientRect()
+    dragState.startX = e.clientX - rect.left
+    dragState.startY = e.clientY - rect.top
+    dragState.currentX = rect.left
+    dragState.currentY = rect.top
   }
-
-  dragState.isDragging = true
-  dragState.popperElement = popper
-
-  const rect = popper.getBoundingClientRect()
-  dragState.startX = e.clientX - rect.left
-  dragState.startY = e.clientY - rect.top
-  dragState.currentX = rect.left
-  dragState.currentY = rect.top
 
   document.addEventListener('mousemove', handleDragMove, { passive: false })
   document.addEventListener('mouseup', handleDragEnd)
@@ -789,17 +922,15 @@ function handleDragStart(e) {
 }
 
 function handleDragMove(e) {
-  if (!dragState.isDragging || !dragState.popperElement) return
+  if (!dragState.isDragging) return
 
   let newX = e.clientX - dragState.startX
   let newY = e.clientY - dragState.startY
   dragState.hasDragged = true
 
   // Clamp to window bounds
-  const popper = dragState.popperElement
-  const rect = popper.getBoundingClientRect()
-  const maxX = window.innerWidth - rect.width
-  const maxY = window.innerHeight - rect.height
+  const maxX = window.innerWidth - currentSize.value.width
+  const maxY = window.innerHeight - currentSize.value.height
 
   newX = Math.max(0, Math.min(newX, maxX))
   newY = Math.max(HEADER_HEIGHT, Math.min(newY, maxY))
@@ -811,20 +942,22 @@ function handleDragMove(e) {
   if (props.isPinned) {
     currentPosition.value = { x: newX, y: newY }
     emit('position-update', currentPosition.value)
+  } else if (dragState.popperElement) {
+    // For hover mode, apply styles to popper element
+    const popper = dragState.popperElement
+    // Disable all transitions and animations
+    popper.style.transition = 'none'
+    popper.style.animation = 'none'
+
+    // Set fixed position with !important to override popper.js
+    popper.style.setProperty('position', 'fixed', 'important')
+    popper.style.setProperty('left', `${newX}px`, 'important')
+    popper.style.setProperty('top', `${newY}px`, 'important')
+    popper.style.setProperty('right', 'auto', 'important')
+    popper.style.setProperty('bottom', 'auto', 'important')
+    popper.style.setProperty('transform', 'none', 'important')
+    popper.style.setProperty('margin', '0', 'important')
   }
-
-  // Disable all transitions and animations
-  popper.style.transition = 'none'
-  popper.style.animation = 'none'
-
-  // Set fixed position with !important to override popper.js
-  popper.style.setProperty('position', 'fixed', 'important')
-  popper.style.setProperty('left', `${newX}px`, 'important')
-  popper.style.setProperty('top', `${newY}px`, 'important')
-  popper.style.setProperty('right', 'auto', 'important')
-  popper.style.setProperty('bottom', 'auto', 'important')
-  popper.style.setProperty('transform', 'none', 'important')
-  popper.style.setProperty('margin', '0', 'important')
 }
 
 function handleDragEnd() {
@@ -866,19 +999,19 @@ watch(viewMode, (newMode) => {
 })
 
 // Watch for position/size changes in pinned mode
-watch([currentPosition, currentSize], () => {
-  if (props.isPinned) {
-    nextTick(() => {
-      applyPinnedPosition()
-    })
-  }
-}, { deep: true })
+// (The pinnedWrapperStyle computed property handles the positioning automatically)
 
 // Initialize position/size for pinned tooltips
 watch(() => props.isPinned, (isPinned) => {
   if (isPinned) {
     currentPosition.value = { ...props.initialPosition }
     currentSize.value = { ...props.initialSize }
+    viewMode.value = props.initialViewMode || 'raw'
+    nextTick(() => {
+      if (popoverRef.value) {
+        popoverRef.value.hide()
+      }
+    })
   }
 }, { immediate: true })
 
@@ -893,6 +1026,61 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/* Pinned Tooltip Wrapper */
+.pinned-tooltip-wrapper {
+  overflow: hidden;
+  pointer-events: auto;
+  font-weight: 400 !important;
+}
+
+.pinned-tooltip-wrapper * {
+  font-weight: inherit !important;
+}
+
+.pinned-tooltip-wrapper .message-tooltip-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: auto;
+  font-weight: 400;
+}
+
+.pinned-tooltip-wrapper .tooltip-body {
+  flex: 1;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+
+.pinned-tooltip-wrapper .tooltip-header {
+  background-color: #f5f7fa;
+}
+
+.pinned-tooltip-wrapper .raw-view .message-text {
+  font-weight: 400 !important;
+  word-break: break-word;
+}
+
+.pinned-tooltip-wrapper .message-text {
+  font-weight: 400 !important;
+}
+
+.pinned-tooltip-wrapper pre {
+  font-weight: 400 !important;
+}
+
+.pinned-tooltip-wrapper .raw-text {
+  font-weight: 400 !important;
+  font-synthesis: none;
+}
+
+.pinned-tooltip-wrapper .json-content {
+  background-color: transparent !important;
+  color: #303133 !important;
+  padding: 12px;
+  box-shadow: none;
+}
+
 .message-tooltip-trigger {
   cursor: pointer;
   display: block;
@@ -958,6 +1146,7 @@ onUnmounted(() => {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
+  font-weight: 400 !important;
 }
 
 .json-view {

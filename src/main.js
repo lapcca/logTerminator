@@ -13,3 +13,9 @@ for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
 
 app.use(ElementPlus)
 app.mount('#app')
+
+if (typeof window !== 'undefined' && window.__TAURI__) {
+  import('@tauri-apps/api/window')
+    .then(({ appWindow }) => appWindow.maximize())
+    .catch(() => {})
+}
