@@ -2305,10 +2305,11 @@ function updatePinnedSize(size) {
 }
 
 .message-tooltip-popover .json-content {
-  background-color: transparent;
-  color: #303133;
-  padding: 12px;
+  background-color: #000000;
+  color: #e6edf3;
+  padding: 12px 14px;
   border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 /* Pinned Tooltip Popover Styles */

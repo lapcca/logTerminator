@@ -129,11 +129,11 @@
     v-else
     ref="popoverRef"
     :width="popoverWidth"
+    :popper-class="popoverClass"
     placement="auto"
     trigger="hover"
     :show-after="200"
     :hide-after="100"
-    popper-class="message-tooltip-popover"
     :popper-options="popperOptions">
     <template #reference>
       <span
@@ -391,11 +391,19 @@ const popperOptions = computed(() => ({
 }))
 
 // Computed
+const jsonContentWidth = ref(null)
+
 const popoverWidth = computed(() => {
   if (!hasJson.value) {
     return '400px'
   }
-  const size = getJsonSize(props.message)
+  if (viewMode.value === 'json') {
+    if (jsonContentWidth.value) {
+      return `${jsonContentWidth.value}px`
+    }
+    return '600px'
+  }
+  const size = getJsonSize(parsedJson.value)
   return size > props.largeJsonThreshold ? '80%' : '600px'
 })
 
@@ -423,6 +431,8 @@ const truncatedMessage = computed(() => {
   // Return full message - let CSS handle truncation with text-overflow: ellipsis
   return props.message
 })
+
+const popoverClass = computed(() => 'message-tooltip-popover')
 
 const pinnedWrapperStyle = computed(() => {
   if (!props.isPinned) {
@@ -502,7 +512,21 @@ function generateHighlightedJson() {
     highlightedJson.value = syntaxHighlightJson(parsedJson.value)
     // Initialize displayJson with the original highlighted version
     displayJson.value = highlightedJson.value
+    updateJsonContentWidth()
   }
+}
+
+function updateJsonContentWidth() {
+  if (viewMode.value !== 'json') return
+  nextTick(() => {
+    const target = jsonContentRef.value || jsonViewRef.value
+    if (!target) return
+    const padding = 32
+    const measured = target.scrollWidth + padding
+    const maxWidth = Math.floor(window.innerWidth * 0.85)
+    const minWidth = 520
+    jsonContentWidth.value = Math.max(minWidth, Math.min(measured, maxWidth))
+  })
 }
 
 async function copyRaw() {
@@ -990,12 +1014,21 @@ watch(viewMode, (newMode) => {
   if (newMode === 'json' && highlightedJson.value && displayJson.value !== highlightedJson.value) {
     displayJson.value = highlightedJson.value
   }
+  if (newMode === 'json') {
+    updateJsonContentWidth()
+  }
   // Lock position after mode change if dragged
   nextTick(() => {
     if (dragState.hasDragged) {
       lockPosition()
     }
   })
+})
+
+watch(displayJson, () => {
+  if (viewMode.value === 'json') {
+    updateJsonContentWidth()
+  }
 })
 
 // Watch for position/size changes in pinned mode
@@ -1075,10 +1108,13 @@ onUnmounted(() => {
 }
 
 .pinned-tooltip-wrapper .json-content {
-  background-color: transparent !important;
-  color: #303133 !important;
-  padding: 12px;
-  box-shadow: none;
+  background-color: #000000 !important;
+  color: #e6edf3 !important;
+  padding: 14px 16px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  width: max-content;
+  max-width: 80vw;
 }
 
 .message-tooltip-trigger {
@@ -1094,6 +1130,7 @@ onUnmounted(() => {
   color: #409EFF;
   font-weight: 500;
 }
+
 
 .tooltip-header {
   display: flex;
@@ -1153,6 +1190,8 @@ onUnmounted(() => {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 13px;
   line-height: 1.5;
+  width: max-content;
+  max-width: 80vw;
 }
 
 .json-error {
@@ -1161,11 +1200,13 @@ onUnmounted(() => {
 }
 
 .json-content {
-  background-color: #282c34;
-  color: #abb2bf;
-  padding: 16px;
+  background-color: #000000;
+  color: #e6edf3;
+  padding: 14px 16px;
   border-radius: 6px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  width: max-content;
+  max-width: 80vw;
 }
 
 .search-bar {
@@ -1246,7 +1287,7 @@ onUnmounted(() => {
 
 :deep(.json-item) {
   margin-left: 40px; /* 4-space indentation */
-  border-left: 1px solid #4b5263;
+  border-left: 1px solid #3d434b;
   padding-left: 8px;
 }
 
