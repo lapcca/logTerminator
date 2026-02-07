@@ -1672,7 +1672,7 @@ function updatePinnedSize(size) {
                     <el-tooltip
                       v-if="row.stack"
                       placement="auto"
-                      :show-after="200"
+                      :show-after="2000"
                       :hide-after="500"
                       effect="light"
                       popper-class="stack-tooltip-large"
@@ -2440,6 +2440,7 @@ function updatePinnedSize(size) {
 /* Message Tooltip Popover Styles */
 .message-tooltip-popover {
   max-width: 80%;
+  z-index: 9999 !important;
 }
 
 .message-tooltip-popover .el-popover__body {

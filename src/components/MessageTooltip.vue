@@ -132,7 +132,7 @@
     :popper-class="popoverClass"
     placement="auto"
     trigger="hover"
-    :show-after="200"
+    :show-after="2000"
     :hide-after="100"
     :popper-options="popperOptions">
     <template #reference>
