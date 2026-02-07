@@ -409,15 +409,6 @@ fn get_session_log_levels(state: State<'_, AppState>, session_id: String) -> Res
         .map_err(|e| format!("Failed to get session log levels: {}", e))
 }
 
-// Auto-bookmark all MARKER level entries (except those containing "###")
-#[tauri::command]
-fn auto_bookmark_markers(state: State<'_, AppState>, session_id: String) -> Result<Vec<Bookmark>, String> {
-    let db_manager = state.db_manager.lock().unwrap();
-    db_manager
-        .auto_bookmark_markers(&session_id)
-        .map_err(|e| format!("Failed to auto-bookmark markers: {}", e))
-}
-
 // Delete test session
 #[tauri::command]
 fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
@@ -532,7 +523,6 @@ pub fn run() {
             get_entry_page,
             get_sessions,
             get_session_log_levels,
-            auto_bookmark_markers,
             delete_session
         ])
         .run(tauri::generate_context!())
