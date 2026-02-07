@@ -641,6 +641,17 @@ async function refreshLogs() {
     totalEntries.value = total || 0
     console.log('Total entries from backend:', total, 'Items per page:', options.itemsPerPage, 'Calculated totalPages:', Math.ceil(total / options.itemsPerPage))
 
+    // Ensure auto-bookmarks are created for this session (only on page 1, i.e., when loading a new session)
+    if (options.page === 1) {
+      try {
+        const autoBookmarks = await invoke('ensure_auto_bookmarks', { sessionId: currentSession.value })
+        console.log('Auto-bookmarked', autoBookmarks.length, 'entries')
+      } catch (error) {
+        console.error('Error ensuring auto-bookmarks:', error)
+        // Don't alert - this is not critical
+      }
+    }
+
     await loadBookmarks()
   } catch (error) {
     console.error('Error fetching logs:', error)
