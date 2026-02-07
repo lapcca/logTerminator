@@ -313,7 +313,7 @@ impl DatabaseManager {
     }
 
     pub fn delete_session(&self, session_id: &str) -> SqlResult<()> {
-        println!("[DB] Starting delete_session for id={}", session_id);
+        log::info!("[DB] Starting delete_session for id={}", session_id);
 
         // Use transaction for atomicity
         let tx = self.conn.unchecked_transaction()?;
@@ -324,14 +324,14 @@ impl DatabaseManager {
             let entry_ids: Vec<i64> = stmt.query_map([session_id], |row| row.get(0))?
                 .collect::<Result<Vec<_>, _>>()?;
 
-            println!("[DB] Found {} log entries to delete", entry_ids.len());
+            log::info!("[DB] Found {} log entries to delete", entry_ids.len());
 
             // Delete bookmarks for each entry
             if !entry_ids.is_empty() {
                 for entry_id in &entry_ids {
                     tx.execute("DELETE FROM bookmarks WHERE log_entry_id = ?", [entry_id])?;
                 }
-                println!("[DB] Deleted bookmarks for {} entries", entry_ids.len());
+                log::info!("[DB] Deleted bookmarks for {} entries", entry_ids.len());
             }
 
             // Delete log entries
@@ -339,15 +339,15 @@ impl DatabaseManager {
                 "DELETE FROM log_entries WHERE test_session_id = ?",
                 [session_id],
             )?;
-            println!("[DB] Deleted log entries for session");
+            log::info!("[DB] Deleted log entries for session");
 
             // Delete the session
             tx.execute("DELETE FROM test_sessions WHERE id = ?", [session_id])?;
-            println!("[DB] Deleted session record");
+            log::info!("[DB] Deleted session record");
         } // stmt is dropped here
 
         tx.commit()?;
-        println!("[DB] Transaction committed");
+        log::info!("[DB] Transaction committed");
 
         Ok(())
     }
@@ -355,7 +355,7 @@ impl DatabaseManager {
     /// Find and delete a session with the same name and directory path
     /// Returns the session_id of the deleted session, if any
     pub fn delete_session_by_name_and_path(&self, name: &str, directory_path: &str) -> SqlResult<Option<String>> {
-        println!("[DB] delete_session_by_name_and_path: name={}, dir={}", name, directory_path);
+        log::info!("[DB] delete_session_by_name_and_path: name={}, dir={}", name, directory_path);
 
         let mut stmt = self.conn.prepare(
             "SELECT id FROM test_sessions WHERE name = ? AND directory_path = ?"
@@ -367,7 +367,7 @@ impl DatabaseManager {
 
         match &session_id_opt {
             Some(id) => println!("[DB] Found existing session: {}", id),
-            None => println!("[DB] No existing session found"),
+            None => log::info!("[DB] No existing session found"),
         }
 
         if let Some(session_id) = session_id_opt {
@@ -487,5 +487,57 @@ impl DatabaseManager {
 
         let level_iter = stmt.query_map([session_id], |row| row.get(0))?;
         level_iter.collect()
+    }
+
+    /// Automatically bookmark all MARKER level entries (except those containing "###")
+    /// Returns the list of created bookmarks
+    pub fn auto_bookmark_markers(&self, session_id: &str) -> SqlResult<Vec<Bookmark>> {
+        // Query all MARKER level entries where message doesn't contain "###"
+        let query = "
+            SELECT id, message
+            FROM log_entries
+            WHERE test_session_id = ? AND level = 'MARKER' AND message NOT LIKE '%###%'
+            ORDER BY timestamp ASC
+        ";
+
+        let mut stmt = self.conn.prepare(query)?;
+        let entry_iter = stmt.query_map([session_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,  // id
+                row.get::<_, String>(1)?, // message
+            ))
+        })?;
+
+        let mut created_bookmarks = Vec::new();
+
+        for entry_result in entry_iter {
+            let (entry_id, message) = entry_result?;
+
+            // Check if bookmark already exists
+            let bookmark_exists = self.conn.query_row(
+                "SELECT id FROM bookmarks WHERE log_entry_id = ?",
+                [&entry_id],
+                |_| Ok(true),
+            ).optional()?.unwrap_or(false);
+
+            // If no existing bookmark, create one
+            if !bookmark_exists {
+                let bookmark = Bookmark {
+                    id: None,
+                    log_entry_id: entry_id,
+                    title: Some(message.clone()), // Use full message as title
+                    notes: None,
+                    color: Some("blue".to_string()),    // Default color for auto-bookmarks
+                    created_at: None,
+                };
+
+                let bookmark_id = self.add_bookmark(&bookmark)?;
+                let mut created = bookmark;
+                created.id = Some(bookmark_id);
+                created_bookmarks.push(created);
+            }
+        }
+
+        Ok(created_bookmarks)
     }
 }

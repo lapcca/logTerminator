@@ -26,7 +26,7 @@ fn scan_log_directory(
     state: State<'_, AppState>,
     directory_path: String,
 ) -> Result<Vec<ScanResult>, String> {
-    println!("Scanning directory: {}", directory_path);
+    log::info!("Scanning directory: {}", directory_path);
 
     // Get existing sessions to check which tests are already loaded
     let existing_sessions = {
@@ -213,10 +213,10 @@ fn parse_directory_blocking(
                 let bookmark = create_auto_bookmark(*entry_id, title.clone());
                 match db_manager.add_bookmark(&bookmark) {
                     Ok(_) => {
-                        println!("[BLOCKING] Created auto-bookmark: '{}'", title);
+                                        log::info!("[BLOCKING] Created auto-bookmark: '{}'", title);
                     }
                     Err(e) => {
-                        eprintln!("Warning: Failed to create auto-bookmark '{}': {}", title, e);
+                        log::warn!("Failed to create auto-bookmark '{}': {}", title, e);
                     }
                 }
             }
@@ -409,6 +409,15 @@ fn get_session_log_levels(state: State<'_, AppState>, session_id: String) -> Res
         .map_err(|e| format!("Failed to get session log levels: {}", e))
 }
 
+// Auto-bookmark all MARKER level entries (except those containing "###")
+#[tauri::command]
+fn auto_bookmark_markers(state: State<'_, AppState>, session_id: String) -> Result<Vec<Bookmark>, String> {
+    let db_manager = state.db_manager.lock().unwrap();
+    db_manager
+        .auto_bookmark_markers(&session_id)
+        .map_err(|e| format!("Failed to auto-bookmark markers: {}", e))
+}
+
 // Delete test session
 #[tauri::command]
 fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
@@ -460,9 +469,44 @@ fn get_entry_page(
         .map_err(|e| format!("Failed to get entry page: {}", e))
 }
 
+/// Initialize logging to file in the same directory as the executable
+fn init_logging() -> std::io::Result<()> {
+    use std::fs::OpenOptions;
+
+    // Get the directory containing the executable
+    let exe_path = std::env::current_exe()?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Cannot determine executable directory",
+        ))?;
+
+    // Create/open log file in the same directory
+    let log_file = exe_dir.join("logterminator.log");
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)?;
+
+    // Initialize env_logger to write to the file
+    env_logger::Builder::new()
+        .target(env_logger::Target::Pipe(Box::new(file)))
+        .filter_level(log::LevelFilter::Info) // Default to info level
+        .init();
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize logging to file
+    if let Err(e) = init_logging() {
+        eprintln!("Failed to initialize logging: {}", e);
+    }
+
     // Initialize database
+    log::info!("Starting logTerminator application");
     let db_path = "logterminator.db";
     let db_manager = DatabaseManager::new(db_path).expect("Failed to initialize database");
 
@@ -488,6 +532,7 @@ pub fn run() {
             get_entry_page,
             get_sessions,
             get_session_log_levels,
+            auto_bookmark_markers,
             delete_session
         ])
         .run(tauri::generate_context!())

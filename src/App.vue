@@ -34,6 +34,7 @@ import {
 import MessageTooltip from './components/MessageTooltip.vue'
 import TestSelectionDialog from './components/TestSelectionDialog.vue'
 import { parsePythonStackTrace, getStackPreview, isPythonStackTrace } from './utils/stackParser.js'
+import { formatMessage } from './utils/messageFormatter.js'
 
 // Custom logTerminator icon component
 const LogTerminatorIcon = {
@@ -639,6 +640,17 @@ async function refreshLogs() {
     logEntries.value = entries || []
     totalEntries.value = total || 0
     console.log('Total entries from backend:', total, 'Items per page:', options.itemsPerPage, 'Calculated totalPages:', Math.ceil(total / options.itemsPerPage))
+
+    // Auto-bookmark MARKER entries (only when loading page 1, i.e., new session load)
+    if (options.page === 1) {
+      try {
+        const autoBookmarks = await invoke('auto_bookmark_markers', { sessionId: currentSession.value })
+        console.log('Auto-bookmarked', autoBookmarks.length, 'MARKER entries')
+      } catch (error) {
+        console.error('Error auto-bookmarking markers:', error)
+        // Don't alert - this is not critical
+      }
+    }
 
     await loadBookmarks()
   } catch (error) {
@@ -1655,61 +1667,22 @@ function updatePinnedSize(size) {
                     </el-tag>
                   </template>
                 </el-table-column>
-                <el-table-column prop="stack" label="调用栈" width="280">
+                <el-table-column prop="stack" label="调用栈" width="60" align="center">
                   <template #default="{ row }">
                     <el-tooltip
                       v-if="row.stack"
-                      placement="auto"
-                      :show-after="200"
-                      :hide-after="500"
+                      placement="left"
+                      :show-after="300"
                       effect="light"
-                      popper-class="stack-tooltip-large"
-                      :offset="10"
-                      :popper-options="{
-                        modifiers: [
-                          { name: 'flip', options: { fallbackPlacements: ['top', 'bottom', 'left', 'right'] } },
-                          { name: 'preventOverflow', options: { boundary: 'viewport' } }
-                        ]
-                      }"
-                      raw-content>
+                      popper-class="stack-tooltip">
                       <template #content>
-                        <div class="tooltip-content">
-                          <div class="tooltip-header">
-                            <el-icon><MoreFilled /></el-icon>
-                            Stack Trace
-                          </div>
-                          <!-- Python stack trace with tabs -->
-                          <template v-if="isPythonStack(row.stack)">
-                            <el-tabs model-value="parsed" class="stack-tabs">
-                              <el-tab-pane label="解析表格" name="parsed">
-                                <el-table
-                                  :data="parseStack(row.stack)"
-                                  size="small"
-                                  :header-cell-style="{ background: '#f5f7fa', color: '#606266', fontWeight: '600' }"
-                                  class="tooltip-stack-table"
-                                  max-height="300">
-                                  <el-table-column label="文件" min-width="150">
-                                    <template #default="{ row: stackRow }">
-                                      <span :title="stackRow.file">{{ getFileName(stackRow.file) }}</span>
-                                    </template>
-                                  </el-table-column>
-                                  <el-table-column prop="line" label="行号" width="60" align="center" />
-                                  <el-table-column prop="function" label="函数" min-width="120" show-overflow-tooltip />
-                                  <el-table-column prop="code" label="代码" min-width="180" show-overflow-tooltip />
-                                </el-table>
-                              </el-tab-pane>
-                              <el-tab-pane label="原始栈" name="raw">
-                                <div class="tooltip-text">{{ row.stack }}</div>
-                              </el-tab-pane>
-                            </el-tabs>
-                          </template>
-                          <!-- Non-Python stack trace: show raw text only -->
-                          <div v-else class="tooltip-text">{{ row.stack }}</div>
-                        </div>
+                        <div class="stack-trace">{{ row.stack }}</div>
                       </template>
-                      <span class="stack-cell">{{ formatStack(row.stack) }}</span>
+                      <el-icon :size="18" class="stack-icon">
+                        <WarningFilled />
+                      </el-icon>
                     </el-tooltip>
-                    <span v-else class="stack-cell">-</span>
+                    <span v-else class="stack-placeholder">-</span>
                   </template>
                 </el-table-column>
                 <el-table-column
@@ -1719,7 +1692,7 @@ function updatePinnedSize(size) {
                   <template #default="{ row }">
                     <div class="message-cell-wrapper">
                       <MessageTooltip
-                        :message="row.message"
+                        :message="formatMessage(row.message)"
                         :is-pinned="pinnedTooltip.visible && pinnedTooltip.rowId === row.id"
                         :initial-position="pinnedTooltip.position"
                         :initial-view-mode="pinnedTooltip.viewMode"
@@ -2091,15 +2064,39 @@ function updatePinnedSize(size) {
   max-width: 240px;
 }
 
+/* Stack column icon styles */
+.stack-icon {
+  cursor: pointer;
+  color: var(--el-text-color-secondary);
+  transition: color 0.2s ease;
+}
+
+.stack-icon:hover {
+  color: var(--el-color-warning);
+}
+
+.stack-placeholder {
+  color: #c0c4cc;
+  font-size: 14px;
+}
+
+/* Stack trace tooltip content */
+.stack-trace {
+  font-family: 'Consolas', 'Monaco', monospace;
+  white-space: pre-wrap;
+  max-width: 600px;
+  max-height: 400px;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .message-cell {
   font-size: 14px;
   width: 100%;
   overflow: hidden;
-  /* Support multi-line display with max 3 lines */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  text-overflow: ellipsis;
+  /* Preserve newlines from original logs */
+  white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
 }
@@ -2119,12 +2116,8 @@ function updatePinnedSize(size) {
 :deep(.el-table__body-wrapper .el-table__body .message-column .cell) {
   width: 100% !important;
   overflow: visible !important;
-  /* Support multi-line display with max 3 lines */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  text-overflow: ellipsis;
-  white-space: normal;
+  /* Preserve newlines from original logs */
+  white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
 }
@@ -2136,12 +2129,8 @@ function updatePinnedSize(size) {
 :deep(.el-table__body-wrapper .el-table__body .message-column .cell .message-tooltip-trigger) {
   width: 100%;
   display: block;
-  /* Support multi-line display with max 3 lines */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  text-overflow: ellipsis;
-  white-space: normal;
+  /* Preserve newlines from original logs */
+  white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
 }
