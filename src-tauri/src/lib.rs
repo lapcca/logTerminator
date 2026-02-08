@@ -527,10 +527,11 @@ fn init_logging() -> std::io::Result<()> {
         .open(&log_file)?;
 
     // Initialize env_logger to write to BOTH file and console
-    // Use Debug level to capture all important logs
+    // Use Debug level for our code, Info for dependencies (to reduce noise)
     env_logger::Builder::new()
         .format_timestamp_millis()
-        .filter_level(log::LevelFilter::Debug) // Capture debug, info, warn, error
+        .filter_level(log::LevelFilter::Info) // Default to Info for dependencies
+        .filter_module("logterminator", log::LevelFilter::Debug) // Debug for our app
         .format(|buf, record| {
             use std::io::Write;
             writeln!(
@@ -548,7 +549,7 @@ fn init_logging() -> std::io::Result<()> {
 
     // Log initialization
     println!("Logging initialized. Log file: {}", log_file.display());
-    println!("Log level: Debug (all logs will be captured)");
+    println!("Log level: Debug (app) / Info (dependencies)");
 
     Ok(())
 }
