@@ -1,6 +1,7 @@
 pub mod bookmark_utils;
 mod database;
 pub mod http_log_fetcher;
+pub mod http_async;
 pub mod log_parser;
 
 use crate::bookmark_utils::{create_auto_bookmark, find_auto_bookmark_markers};
