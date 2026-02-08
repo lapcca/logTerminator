@@ -92,7 +92,7 @@
       <div class="tooltip-body" :style="{ maxHeight: popoverHeight }">
         <!-- Raw view -->
         <div v-if="viewMode === 'raw'" class="raw-view">
-          <pre class="message-text pinned-raw-text" style="font-weight: 400 !important; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-synthesis: none;"><span class="raw-text">{{ message }}</span></pre>
+          <pre class="message-text pinned-raw-text" style="font-weight: 400 !important; font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-synthesis: none;"><span class="raw-text">{{ displayMessage || message }}</span></pre>
         </div>
 
         <!-- JSON view -->
@@ -131,7 +131,7 @@
     :width="popoverWidth"
     :popper-class="popoverClass"
     placement="auto"
-    trigger="hover"
+    :trigger="props.disableHover ? 'manual' : 'hover'"
     :show-after="2000"
     :hide-after="100"
     :popper-options="popperOptions">
@@ -235,7 +235,7 @@
       <div class="tooltip-body" :style="{ maxHeight: popoverHeight }">
         <!-- Raw view -->
         <div v-if="viewMode === 'raw'" class="raw-view">
-          <pre class="message-text" :style="isPinned ? pinnedRawInlineStyle : null"><span class="raw-text">{{ message }}</span></pre>
+          <pre class="message-text" :style="isPinned ? pinnedRawInlineStyle : null"><span class="raw-text">{{ displayMessage || message }}</span></pre>
         </div>
 
         <!-- JSON view -->
@@ -262,6 +262,14 @@ const props = defineProps({
   message: {
     type: String,
     default: ''
+  },
+  displayMessage: {
+    type: String,
+    default: ''
+  },
+  disableHover: {
+    type: Boolean,
+    default: false
   },
   initialViewMode: {
     type: String,
@@ -425,11 +433,12 @@ const popoverHeight = computed(() => {
 })
 
 const truncatedMessage = computed(() => {
-  if (!props.message) {
+  // Use displayMessage if provided, otherwise use full message
+  const msg = props.displayMessage || props.message
+  if (!msg) {
     return '-'
   }
-  // Return full message - let CSS handle truncation with text-overflow: ellipsis
-  return props.message
+  return msg
 })
 
 const popoverClass = computed(() => 'message-tooltip-popover')

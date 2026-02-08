@@ -194,6 +194,42 @@ const highlightedEntryId = ref(null) // 当前高亮的条目ID
 const jumpToPage = ref(1) // 跳转到页码输入框的值
 const levelSelectRef = ref(null) // Ref for level filter select dropdown
 
+// Message expand/collapse state
+const expandedMessageIds = ref(new Set()) // Set of message IDs that are expanded
+const MESSAGE_LINE_LIMIT = 20 // Max lines to show before collapsing
+const CHAR_WIDTH = 9 // Approximate character width in pixels (for monospace font)
+const COLUMN_WIDTH = 400 // Approximate message column width in pixels
+
+// Calculate visual line count for a message using the correct formula:
+// 临时行数 = max((字符数 * 单个字符宽度 / 当前message列的宽度), 1)
+// 行数 = 临时行数 + 字符里的换行符个数
+function calculateVisualLines(message) {
+  if (!message) return 0
+
+  const charCount = message.length
+
+  // 计算临时行数（确保最少有一行）
+  const tempLines = Math.max(Math.ceil(charCount * CHAR_WIDTH / COLUMN_WIDTH), 1)
+
+  // 计算换行符个数
+  const newlineCount = (message.match(/\n/g) || []).length
+
+  // 总行数 = 临时行数 + 换行符个数
+  return tempLines + newlineCount
+}
+
+// State to track if hovering on expand button (to disable tooltip)
+const hoveringExpandButton = ref(false)
+
+// Handle hover events on expand button
+function handleExpandHover() {
+  hoveringExpandButton.value = true
+}
+
+function handleExpandLeave() {
+  hoveringExpandButton.value = false
+}
+
 // Pinned tooltip state
 const pinnedTooltip = ref({
   visible: false,
@@ -810,6 +846,64 @@ function getFileName(filePath) {
 function formatStack(stack) {
   if (!stack) return '-'
   return stack.replace(/\n/g, ' ').trim()
+}
+
+// Check if a message should be collapsed (visual lines > 20)
+function needsCollapse(message) {
+  const visualLines = calculateVisualLines(message)
+  return visualLines > MESSAGE_LINE_LIMIT
+}
+
+// Check if a message is currently expanded
+function isExpanded(entryId) {
+  return expandedMessageIds.value.has(entryId)
+}
+
+// Toggle expand/collapse for a message
+function toggleExpand(entryId, event) {
+  // Stop event propagation immediately
+  if (event) {
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+  }
+
+  if (expandedMessageIds.value.has(entryId)) {
+    expandedMessageIds.value.delete(entryId)
+  } else {
+    expandedMessageIds.value.add(entryId)
+  }
+  // Force reactivity by creating a new Set
+  expandedMessageIds.value = new Set(expandedMessageIds.value)
+}
+
+// Get display message (truncated if needed)
+// Uses the same line calculation logic as calculateVisualLines
+function getDisplayMessage(row) {
+  const message = row.message
+  if (!message) return ''
+
+  const visualLines = calculateVisualLines(message)
+  if (visualLines <= MESSAGE_LINE_LIMIT) {
+    return message
+  }
+
+  // Message needs to be collapsed
+  // Calculate approximate max characters for MESSAGE_LINE_LIMIT lines
+  // Each line can fit approximately (COLUMN_WIDTH / CHAR_WIDTH) characters
+  const charsPerLine = Math.floor(COLUMN_WIDTH / CHAR_WIDTH)
+  const maxChars = MESSAGE_LINE_LIMIT * charsPerLine
+
+  // Truncate to max characters
+  let truncated = message.substring(0, maxChars)
+
+  // If the truncated message has newlines, try to end at a complete line
+  const lastNewline = truncated.lastIndexOf('\n')
+  if (lastNewline > maxChars * 0.7) {
+    // Last newline is reasonably close to maxChars (within 70%), use it
+    truncated = message.substring(0, lastNewline)
+  }
+
+  return truncated
 }
 
 // Extract time from timestamp (HH:mm:ss format)
@@ -1654,76 +1748,80 @@ function updatePinnedSize(size) {
                 :height="tableHeight"
                 v-loading="loading"
                 stripe
-                highlight-current-row
-                @row-click="toggleRowSelection"
                 :row-class-name="getTableRowClassName"
                 :row-key="(row) => row.id">
                 <el-table-column type="selection" width="50" />
-                <el-table-column prop="timestamp" label="时间戳" width="180" />
+                <el-table-column prop="timestamp" label="时间戳" width="180">
+                  <template #default="{ row }">
+                    <span @click="toggleRowSelection(row)" style="cursor: pointer; display: block;">{{ row.timestamp }}</span>
+                  </template>
+                </el-table-column>
                 <el-table-column prop="level" label="级别" width="90">
                   <template #default="{ row }">
-                    <el-tag :type="getLevelType(row.level)" size="small">
+                    <el-tag :type="getLevelType(row.level)" size="small" @click="toggleRowSelection(row)" style="cursor: pointer;">
                       {{ row.level }}
                     </el-tag>
                   </template>
                 </el-table-column>
                 <el-table-column prop="stack" label="调用栈" width="60" align="center">
                   <template #default="{ row }">
-                    <el-tooltip
-                      v-if="row.stack"
-                      placement="auto"
-                      :show-after="2000"
-                      :hide-after="500"
-                      effect="light"
-                      popper-class="stack-tooltip-large"
-                      :offset="10"
-                      :popper-options="{
-                        modifiers: [
-                          { name: 'flip', options: { fallbackPlacements: ['top', 'bottom', 'left', 'right'] } },
-                          { name: 'preventOverflow', options: { boundary: 'viewport' } }
-                        ]
-                      }"
-                      raw-content>
-                      <template #content>
-                        <div class="tooltip-content">
-                          <div class="tooltip-header">
-                            <el-icon><MoreFilled /></el-icon>
-                            Stack Trace
+                    <div @click="toggleRowSelection(row)" style="cursor: pointer; display: flex; justify-content: center; align-items: center; height: 100%;">
+                      <el-tooltip
+                        v-if="row.stack"
+                        placement="auto"
+                        :show-after="2000"
+                        :hide-after="500"
+                        effect="light"
+                        popper-class="stack-tooltip-large"
+                        :offset="10"
+                        :popper-options="{
+                          modifiers: [
+                            { name: 'flip', options: { fallbackPlacements: ['top', 'bottom', 'left', 'right'] } },
+                            { name: 'preventOverflow', options: { boundary: 'viewport' } }
+                          ]
+                        }"
+                        raw-content>
+                        <template #content>
+                          <div class="tooltip-content">
+                            <div class="tooltip-header">
+                              <el-icon><MoreFilled /></el-icon>
+                              Stack Trace
+                            </div>
+                            <!-- Python stack trace with tabs -->
+                            <template v-if="isPythonStack(row.stack)">
+                              <el-tabs model-value="parsed" class="stack-tabs">
+                                <el-tab-pane label="解析表格" name="parsed">
+                                  <el-table
+                                    :data="parseStack(row.stack)"
+                                    size="small"
+                                    :header-cell-style="{ background: '#f5f7fa', color: '#606266', fontWeight: '600' }"
+                                    class="tooltip-stack-table"
+                                    max-height="300">
+                                    <el-table-column label="文件" min-width="150">
+                                      <template #default="{ row: stackRow }">
+                                        <span :title="stackRow.file">{{ getFileName(stackRow.file) }}</span>
+                                      </template>
+                                    </el-table-column>
+                                    <el-table-column prop="line" label="行号" width="60" align="center" />
+                                    <el-table-column prop="function" label="函数" min-width="120" show-overflow-tooltip />
+                                    <el-table-column prop="code" label="代码" min-width="180" show-overflow-tooltip />
+                                  </el-table>
+                                </el-tab-pane>
+                                <el-tab-pane label="原始栈" name="raw">
+                                  <div class="tooltip-text">{{ row.stack }}</div>
+                                </el-tab-pane>
+                              </el-tabs>
+                            </template>
+                            <!-- Non-Python stack trace: show raw text only -->
+                            <div v-else class="tooltip-text">{{ row.stack }}</div>
                           </div>
-                          <!-- Python stack trace with tabs -->
-                          <template v-if="isPythonStack(row.stack)">
-                            <el-tabs model-value="parsed" class="stack-tabs">
-                              <el-tab-pane label="解析表格" name="parsed">
-                                <el-table
-                                  :data="parseStack(row.stack)"
-                                  size="small"
-                                  :header-cell-style="{ background: '#f5f7fa', color: '#606266', fontWeight: '600' }"
-                                  class="tooltip-stack-table"
-                                  max-height="300">
-                                  <el-table-column label="文件" min-width="150">
-                                    <template #default="{ row: stackRow }">
-                                      <span :title="stackRow.file">{{ getFileName(stackRow.file) }}</span>
-                                    </template>
-                                  </el-table-column>
-                                  <el-table-column prop="line" label="行号" width="60" align="center" />
-                                  <el-table-column prop="function" label="函数" min-width="120" show-overflow-tooltip />
-                                  <el-table-column prop="code" label="代码" min-width="180" show-overflow-tooltip />
-                                </el-table>
-                              </el-tab-pane>
-                              <el-tab-pane label="原始栈" name="raw">
-                                <div class="tooltip-text">{{ row.stack }}</div>
-                              </el-tab-pane>
-                            </el-tabs>
-                          </template>
-                          <!-- Non-Python stack trace: show raw text only -->
-                          <div v-else class="tooltip-text">{{ row.stack }}</div>
-                        </div>
-                      </template>
-                      <el-icon :size="18" class="stack-icon">
-                        <WarningFilled />
-                      </el-icon>
-                    </el-tooltip>
-                    <span v-else class="stack-placeholder">-</span>
+                        </template>
+                        <el-icon :size="18" class="stack-icon">
+                          <WarningFilled />
+                        </el-icon>
+                      </el-tooltip>
+                      <span v-else class="stack-placeholder">-</span>
+                    </div>
                   </template>
                 </el-table-column>
                 <el-table-column
@@ -1732,14 +1830,28 @@ function updatePinnedSize(size) {
                   class-name="message-column">
                   <template #default="{ row }">
                     <div class="message-cell-wrapper">
+                      <span
+                        v-if="needsCollapse(row.message)"
+                        class="expand-toggle"
+                        @click.stop.prevent="toggleExpand(row.id, $event)"
+                        @mousedown.stop.prevent
+                        @mouseup.stop.prevent
+                        @mouseenter="handleExpandHover"
+                        @mouseleave="handleExpandLeave"
+                        style="display: inline-flex; align-items: center; justify-content: center; cursor: pointer; user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none;">
+                        {{ isExpanded(row.id) ? '-' : '+' }}
+                      </span>
                       <MessageTooltip
+                        ref="messageTooltipRefs"
                         :message="formatMessage(row.message)"
+                        :display-message="isExpanded(row.id) ? formatMessage(row.message) : getDisplayMessage(row)"
                         :is-pinned="pinnedTooltip.visible && pinnedTooltip.rowId === row.id"
                         :initial-position="pinnedTooltip.position"
                         :initial-view-mode="pinnedTooltip.viewMode"
                         :initial-size="pinnedTooltip.size"
                         :useDialogForLargeJson="true"
                         :largeJsonThreshold="2"
+                        :disable-hover="hoveringExpandButton"
                         @json-detected="(data) => handleJsonDetected(row.id, data)"
                         @pin="(data) => handleTooltipPin(row.id, data)"
                         @close="closePinnedTooltip"
@@ -2068,8 +2180,9 @@ function updatePinnedSize(size) {
   flex: 1;
 }
 
+/* Remove default cursor pointer from rows */
 :deep(.el-table__row) {
-  cursor: pointer;
+  cursor: default;
 }
 
 :deep(.el-table__row.table-row-selected) {
@@ -2154,15 +2267,45 @@ function updatePinnedSize(size) {
 
 :deep(.el-table__body-wrapper .el-table__body .message-column .cell .message-cell-wrapper) {
   width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
 }
 
-:deep(.el-table__body-wrapper .el-table__body .message-column .cell .message-tooltip-trigger) {
-  width: 100%;
+.expand-toggle {
+  display: inline-block;
+  min-width: 24px;
+  padding: 2px 6px;
+  margin-right: 4px;
+  cursor: pointer;
+  color: #409EFF;
+  font-weight: bold;
+  font-size: 16px;
+  line-height: 1.4;
+  user-select: none;
+  flex-shrink: 0;
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 10;
+  border: 1px solid #409EFF;
+  border-radius: 4px;
+  background-color: #ecf5ff;
+}
+
+.expand-toggle:hover {
+  color: #409EFF;
+  background-color: #d9ecff;
+  border-color: #409EFF;
+}
+
+:deep(.el-table__body-wrapper .el-table__body .message-column .cell .message-cell-wrapper .message-tooltip-trigger) {
+  flex: 1;
   display: block;
   /* Preserve newlines from original logs */
   white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.5;
+  pointer-events: auto !important;
 }
 
 /* Pagination */
