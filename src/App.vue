@@ -539,7 +539,7 @@ async function loadFromHttpUrl(url, selectedTests) {
   selectedEntryIds.value = []
 
   try {
-    const sessionIds = await invoke('parse_log_http_url', { url, selectedTests })
+    const sessionIds = await invoke('parse_log_http_url_async', { url, selectedTests })
     console.log('[loadFromHttpUrl] sessionIds returned:', sessionIds)
     loadingMessage.value = `Found ${sessionIds.length} test session(s)`
 
@@ -1240,9 +1240,33 @@ onMounted(() => {
   loadSessions()
   loadSidebarWidth()
 
-  // Listen for HTTP progress events
+  // Listen for HTTP progress events with new async format
   listen('http-progress', (event) => {
-    loadingMessage.value = event.payload
+    try {
+      const progress = JSON.parse(event.payload)
+
+      // ProgressStatus enum serializes with variant name as key
+      if (progress.Connecting !== undefined) {
+        loadingMessage.value = 'Connecting to server...'
+      } else if (progress.Scanning !== undefined) {
+        loadingMessage.value = `Scanning... Found ${progress.Scanning.found} log files`
+      } else if (progress.Downloading !== undefined) {
+        const dl = progress.Downloading
+        const totalProgress = dl.total_files > 0
+          ? Math.round((dl.completed_files / dl.total_files) * 100)
+          : 0
+        loadingMessage.value = `Downloading... ${totalProgress}% (${dl.completed_files}/${dl.total_files} files) - ${dl.speed}`
+      } else if (progress.Parsing !== undefined) {
+        loadingMessage.value = `Parsing ${progress.Parsing.session}...`
+      } else if (progress.Complete !== undefined) {
+        loadingMessage.value = 'Complete!'
+      } else {
+        loadingMessage.value = event.payload // Fallback for unknown format
+      }
+    } catch {
+      // Fallback for old string format
+      loadingMessage.value = event.payload
+    }
   })
 
   // Add resize event listeners

@@ -1,6 +1,7 @@
 pub mod bookmark_utils;
 mod database;
 pub mod http_log_fetcher;
+pub mod http_async;
 pub mod log_parser;
 
 use crate::bookmark_utils::{create_auto_bookmark, find_auto_bookmark_markers};
@@ -333,6 +334,42 @@ async fn parse_log_http_url(
         .map_err(|e| e.to_string())
 }
 
+// Parse logs from HTTP server using async parallel downloads
+#[tauri::command]
+async fn parse_log_http_url_async(
+    _state: State<'_, AppState>,
+    window: tauri::Window,
+    url: String,
+    selected_tests: Option<Vec<String>>,
+) -> Result<Vec<String>, String> {
+    use crate::http_async::{SessionDownloadCoordinator, ProgressStatus};
+    use std::sync::Arc;
+
+    println!("[ASYNC] Starting async parallel HTTP parse for: {}", url);
+    println!("[ASYNC] selected_tests: {:?}", selected_tests);
+
+    let db_path = "logterminator.db".to_string();
+
+    // Create progress callback that emits to frontend
+    let window_clone = window.clone();
+    let progress_callback = Arc::new(move |status: ProgressStatus| {
+        let msg = serde_json::to_string(&status).unwrap_or_else(|_| "{}".to_string());
+        let _ = window_clone.emit("http-progress", msg);
+    });
+
+    // Create coordinator with configured limits
+    let coordinator = SessionDownloadCoordinator::new(2, 6, 2);
+
+    // Run the download
+    coordinator.download_sessions(
+        db_path,
+        url,
+        selected_tests,
+        progress_callback,
+    ).await
+    .map_err(|e| e.to_string())
+}
+
 // Get paginated log entries
 #[tauri::command]
 fn get_log_entries(
@@ -469,7 +506,7 @@ fn get_entry_page(
         .map_err(|e| format!("Failed to get entry page: {}", e))
 }
 
-/// Initialize logging to file in the same directory as the executable
+/// Initialize logging to both file and console
 fn init_logging() -> std::io::Result<()> {
     use std::fs::OpenOptions;
 
@@ -489,11 +526,30 @@ fn init_logging() -> std::io::Result<()> {
         .append(true)
         .open(&log_file)?;
 
-    // Initialize env_logger to write to the file
+    // Initialize env_logger to write to BOTH file and console
+    // Use Debug level for our code, Info for dependencies (to reduce noise)
     env_logger::Builder::new()
+        .format_timestamp_millis()
+        .filter_level(log::LevelFilter::Info) // Default to Info for dependencies
+        .filter_module("logterminator", log::LevelFilter::Debug) // Debug for our app
+        .format(|buf, record| {
+            use std::io::Write;
+            writeln!(
+                buf,
+                "[{} {} {}:{}] {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                record.level(),
+                record.file().unwrap_or("unknown"),
+                record.line().unwrap_or(0),
+                record.args()
+            )
+        })
         .target(env_logger::Target::Pipe(Box::new(file)))
-        .filter_level(log::LevelFilter::Info) // Default to info level
         .init();
+
+    // Log initialization
+    println!("Logging initialized. Log file: {}", log_file.display());
+    println!("Log level: Debug (app) / Info (dependencies)");
 
     Ok(())
 }
@@ -524,6 +580,7 @@ pub fn run() {
             scan_log_http_url,
             parse_log_directory,
             parse_log_http_url,
+            parse_log_http_url_async,
             get_log_entries,
             add_bookmark,
             get_bookmarks,
