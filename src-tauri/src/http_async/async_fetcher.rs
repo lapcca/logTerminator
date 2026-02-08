@@ -78,6 +78,7 @@ impl AsyncHttpLogFetcher {
         bytes_downloaded: &AtomicU64,
         speed_calculator: &SpeedCalculator,
     ) -> Result<DownloadResult, HttpFetchError> {
+        println!("[ASYNC_DL] Starting download: {}", url);
         let response = self.client
             .get(url)
             .send()
@@ -117,6 +118,7 @@ impl AsyncHttpLogFetcher {
             }
         }
 
+        println!("[ASYNC_DL] Completed download: {} ({} bytes)", url, downloaded);
         Ok(DownloadResult::new(url.to_string(), final_content, downloaded))
     }
 
