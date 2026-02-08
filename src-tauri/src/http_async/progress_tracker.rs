@@ -27,7 +27,7 @@ impl SpeedCalculator {
 
         // 移除时间窗口外的旧样本
         while let Some(&(timestamp, _)) = samples.front() {
-            if now.duration_since(timestamp) > self.sample_window {
+            if now.duration_since(timestamp) >= self.sample_window {
                 samples.pop_front();
             } else {
                 break;
@@ -53,7 +53,7 @@ impl SpeedCalculator {
             return 0.0;
         }
 
-        let bytes_transferred = last.1 - first.1;
+        let bytes_transferred = last.1.saturating_sub(first.1);
         bytes_transferred as f64 / time_elapsed
     }
 
@@ -118,7 +118,7 @@ mod tests {
         // Add enough data for KB/s
         calc.add_sample(0);
         calc.add_sample(10 * 1024); // 10 KB
-        let formatted = calc.format_speed();
+        let _formatted = calc.format_speed();
         // Note: exact format depends on timing
     }
 }
