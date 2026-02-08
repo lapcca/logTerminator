@@ -103,7 +103,8 @@ impl SessionDownloadCoordinator {
             let max_retries = self.max_retries;
 
             let task = tokio::spawn(async move {
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await
+                    .map_err(|_| HttpFetchError::ParseError("Semaphore closed".to_string()))?;
                 Self::download_single_session(
                     fetcher_clone,
                     session_name,
@@ -157,8 +158,8 @@ impl SessionDownloadCoordinator {
         let file_semaphore = Arc::new(Semaphore::new(max_files));
         let mut file_tasks = Vec::new();
 
-        // Track file status
-        let file_status = Arc::new(std::sync::Mutex::new(Vec::new()));
+        // Track file status with HashMap for O(1) lookups
+        let file_status = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
         for (file_url, _file_index) in &log_files {
             let semaphore = file_semaphore.clone();
@@ -169,11 +170,13 @@ impl SessionDownloadCoordinator {
             let file_url = file_url.clone();
 
             let task = tokio::spawn(async move {
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await
+                    .map_err(|_| HttpFetchError::ParseError("Semaphore closed".to_string()))?;
+
                 // Update status to downloading
                 {
-                    let mut st = status.lock().unwrap();
-                    st.push(FileStatus {
+                    let mut st = status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
+                    st.insert(file_url.clone(), FileStatus {
                         file_url: file_url.clone(),
                         status: FileDownloadStatus::Downloading,
                         retry_count: 0,
@@ -189,16 +192,16 @@ impl SessionDownloadCoordinator {
                 ).await {
                     Ok(result) => {
                         // Update status to completed
-                        let mut st = status.lock().unwrap();
-                        if let Some(fs) = st.iter_mut().find(|f| f.file_url == file_url) {
+                        let mut st = status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
+                        if let Some(fs) = st.get_mut(&file_url) {
                             fs.status = FileDownloadStatus::Completed;
                         }
                         Ok((file_url, result.content))
                     }
                     Err(e) => {
                         // Update status to failed
-                        let mut st = status.lock().unwrap();
-                        if let Some(fs) = st.iter_mut().find(|f| f.file_url == file_url) {
+                        let mut st = status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
+                        if let Some(fs) = st.get_mut(&file_url) {
                             fs.status = FileDownloadStatus::Failed;
                             fs.error_message = Some(e.to_string());
                         }
@@ -223,7 +226,10 @@ impl SessionDownloadCoordinator {
         }
 
         // Update progress
-        let status_vec = file_status.lock().unwrap().clone();
+        let status_map = file_status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
+        let status_vec: Vec<FileStatus> = status_map.values().cloned().collect();
+        drop(status_map); // Release lock before callback
+
         progress_callback(ProgressStatus::Downloading {
             total_sessions,
             current_session: session_num,
