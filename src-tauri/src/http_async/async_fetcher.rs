@@ -93,11 +93,12 @@ impl AsyncHttpLogFetcher {
         }
 
         // Get content length for progress tracking
-        let _content_length = response.content_length().unwrap_or(0);
+        let content_length = response.content_length().unwrap_or(0);
+        println!("[ASYNC_DL] Content-Length: {} bytes", content_length);
 
-        // Download with progress tracking
+        // Download with progress tracking - use Vec<u8> to handle large files
         let mut downloaded = 0u64;
-        let mut final_content = String::new();
+        let mut buffer = Vec::with_capacity(content_length as usize);
 
         use futures::stream::StreamExt;
         let mut stream = response.bytes_stream();
@@ -110,15 +111,29 @@ impl AsyncHttpLogFetcher {
             bytes_downloaded.fetch_add(chunk.len() as u64, Ordering::Relaxed);
             speed_calculator.add_sample(bytes_downloaded.load(Ordering::Relaxed));
 
-            // For HTML content, try to accumulate as string
-            // If it's binary or too large, we'll handle it differently
-            if final_content.len() + chunk.len() <= 10_000_000 { // 10MB limit for string
-                let text = String::from_utf8_lossy(&chunk[..]);
-                final_content.push_str(&text);
+            // Append chunk to buffer - NO SIZE LIMIT
+            buffer.extend_from_slice(&chunk);
+
+            // Log progress every 5MB
+            if downloaded % (5 * 1024 * 1024) == 0 || downloaded == content_length {
+                println!("[ASYNC_DL] Download progress: {} / {} bytes ({}%)",
+                    downloaded, content_length,
+                    if content_length > 0 { (downloaded * 100 / content_length) } else { 0 });
             }
         }
 
-        println!("[ASYNC_DL] Completed download: {} ({} bytes)", url, downloaded);
+        // Convert to String at the end
+        let final_content = String::from_utf8_lossy(&buffer).to_string();
+        println!("[ASYNC_DL] Completed download: {} ({} bytes, {} chars in string)",
+            url, downloaded, final_content.len());
+
+        // Verify content完整性
+        if final_content.is_empty() {
+            log::error!("[ASYNC_DL] WARNING: Downloaded content is empty for {}", url);
+        } else {
+            log::info!("[ASYNC_DL] Successfully downloaded {} with {} characters", url, final_content.len());
+        }
+
         Ok(DownloadResult::new(url.to_string(), final_content, downloaded))
     }
 

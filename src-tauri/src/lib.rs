@@ -506,7 +506,7 @@ fn get_entry_page(
         .map_err(|e| format!("Failed to get entry page: {}", e))
 }
 
-/// Initialize logging to file in the same directory as the executable
+/// Initialize logging to both file and console
 fn init_logging() -> std::io::Result<()> {
     use std::fs::OpenOptions;
 
@@ -526,11 +526,29 @@ fn init_logging() -> std::io::Result<()> {
         .append(true)
         .open(&log_file)?;
 
-    // Initialize env_logger to write to the file
+    // Initialize env_logger to write to BOTH file and console
+    // Use Debug level to capture all important logs
     env_logger::Builder::new()
+        .format_timestamp_millis()
+        .filter_level(log::LevelFilter::Debug) // Capture debug, info, warn, error
+        .format(|buf, record| {
+            use std::io::Write;
+            writeln!(
+                buf,
+                "[{} {} {}:{}] {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                record.level(),
+                record.file().unwrap_or("unknown"),
+                record.line().unwrap_or(0),
+                record.args()
+            )
+        })
         .target(env_logger::Target::Pipe(Box::new(file)))
-        .filter_level(log::LevelFilter::Info) // Default to info level
         .init();
+
+    // Log initialization
+    println!("Logging initialized. Log file: {}", log_file.display());
+    println!("Log level: Debug (all logs will be captured)");
 
     Ok(())
 }

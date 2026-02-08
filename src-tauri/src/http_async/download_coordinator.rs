@@ -214,16 +214,42 @@ impl SessionDownloadCoordinator {
         }
 
         // Wait for all files and collect results
+        log::info!("Waiting for {} file downloads to complete...", log_files.len());
         let results = futures::future::join_all(file_tasks).await;
-        let mut downloaded_contents = Vec::new();
+        log::info!("All download tasks completed");
 
-        for result in results {
+        let mut downloaded_contents = Vec::new();
+        let mut total_downloaded_bytes = 0u64;
+
+        for (index, result) in results.iter().enumerate() {
             match result {
-                Ok(Ok((url, content))) => downloaded_contents.push((url, content)),
-                Ok(Err(e)) => eprintln!("File download failed: {}", e),
-                Err(e) => eprintln!("Task join error: {}", e),
+                Ok(Ok((url, content))) => {
+                    log::info!("File {}/{} downloaded successfully: {} ({} chars)",
+                        index + 1, results.len(), url, content.len());
+                    total_downloaded_bytes += content.len() as u64;
+
+                    // Verify content is not empty
+                    if content.is_empty() {
+                        log::error!("WARNING: Downloaded content is EMPTY for {}", url);
+                    } else {
+                        log::debug!("Content preview (first 200 chars): {}...", &content[..content.len().min(200)]);
+                    }
+
+                    downloaded_contents.push((url.clone(), content.clone()));
+                }
+                Ok(Err(e)) => {
+                    log::error!("File download {}/{} failed: {}", index + 1, results.len(), e);
+                    eprintln!("File download failed: {}", e);
+                }
+                Err(e) => {
+                    log::error!("Task {}/{} join error: {}", index + 1, results.len(), e);
+                    eprintln!("Task join error: {}", e);
+                }
             }
         }
+
+        log::info!("Total downloaded: ~{} MB across {} files",
+            total_downloaded_bytes / 1024 / 1024, downloaded_contents.len());
 
         // Update progress
         let status_map = file_status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
@@ -273,14 +299,22 @@ impl SessionDownloadCoordinator {
 
         // Parse all downloaded files
         let mut all_entries = Vec::new();
-        for (file_url, html_content) in downloaded_contents {
-            let file_index = 0; // We don't track the exact index here
-            let entries = HtmlLogParser::parse_html_string(&html_content, &file_url, &session_id, file_index)
+        log::info!("Starting to parse {} downloaded files for session {}", downloaded_contents.len(), session_name);
+
+        for (file_index, (file_url, html_content)) in downloaded_contents.iter().enumerate() {
+            log::info!("[Parse {}/{}] Parsing file: {} ({} chars)", file_index + 1, downloaded_contents.len(), file_url, html_content.len());
+
+            let entries = HtmlLogParser::parse_html_string(html_content, file_url, &session_id, file_index)
                 .map_err(|e| HttpFetchError::ParseError(format!("Failed to parse {}: {}", file_url, e)))?;
+
+            log::info!("[Parse {}/{}] Extracted {} entries from {}", file_index + 1, downloaded_contents.len(), entries.len(), file_url);
             all_entries.extend(entries);
         }
 
+        log::info!("Total entries parsed for session {}: {} entries from {} files", session_name, all_entries.len(), downloaded_contents.len());
+
         if all_entries.is_empty() {
+            log::error!("ERROR: No valid log entries found for session {}! Downloaded {} files but parsed 0 entries.", session_name, downloaded_contents.len());
             println!("Warning: No valid log entries found for session {}", session_name);
             return Ok(session_id);
         }
