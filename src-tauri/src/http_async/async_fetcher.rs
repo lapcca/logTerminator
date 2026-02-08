@@ -92,7 +92,7 @@ impl AsyncHttpLogFetcher {
         }
 
         // Get content length for progress tracking
-        let content_length = response.content_length().unwrap_or(0);
+        let _content_length = response.content_length().unwrap_or(0);
 
         // Download with progress tracking
         let mut downloaded = 0u64;
