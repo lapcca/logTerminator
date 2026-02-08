@@ -358,7 +358,7 @@ async fn parse_log_http_url_async(
     });
 
     // Create coordinator with configured limits
-    let coordinator = SessionDownloadCoordinator::new(2, 6, 2);
+    let coordinator = SessionDownloadCoordinator::new(2, 4, 2);
 
     // Run the download
     coordinator.download_sessions(

@@ -161,7 +161,7 @@ impl SessionDownloadCoordinator {
         // Track file status with HashMap for O(1) lookups
         let file_status = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
-        for (file_url, _file_index) in log_files.iter() {
+        for (file_url, file_index) in log_files.iter() {
             let semaphore = file_semaphore.clone();
             let fetcher_clone = fetcher.clone();
             let status = file_status.clone();
@@ -170,6 +170,8 @@ impl SessionDownloadCoordinator {
             let progress_cb_clone = progress_callback.clone();
             let file_url = file_url.clone();
             let log_files_len = log_files.len();
+            // Store the original file_index to preserve it through the async operation
+            let original_file_index = *file_index;
 
             let task = tokio::spawn(async move {
                 let _permit = semaphore.acquire().await
@@ -217,7 +219,8 @@ impl SessionDownloadCoordinator {
                             files: progress_vec,
                         });
 
-                        Ok((file_url, result.content))
+                        // Return the URL, content, AND the original file_index
+                        Ok((file_url, result.content, original_file_index))
                     }
                     Err(e) => {
                         // Update status to failed
@@ -239,14 +242,16 @@ impl SessionDownloadCoordinator {
         let results = futures::future::join_all(file_tasks).await;
         log::info!("All download tasks completed");
 
+        let total_results = results.len();
         let mut downloaded_contents = Vec::new();
         let mut total_downloaded_bytes = 0u64;
+        let mut failed_downloads = Vec::new();
 
-        for (index, result) in results.iter().enumerate() {
+        for (index, result) in results.into_iter().enumerate() {
             match result {
-                Ok(Ok((url, content))) => {
-                    log::info!("File {}/{} downloaded successfully: {} ({} chars)",
-                        index + 1, results.len(), url, content.len());
+                Ok(Ok((url, content, original_file_index))) => {
+                    log::info!("File {}/{} downloaded successfully: {} ({} chars, original_index={})",
+                        index + 1, total_results, url, content.len(), original_file_index);
                     total_downloaded_bytes += content.len() as u64;
 
                     // Verify content is not empty
@@ -256,18 +261,45 @@ impl SessionDownloadCoordinator {
                         log::debug!("Content preview (first 200 chars): {}...", &content[..content.len().min(200)]);
                     }
 
-                    downloaded_contents.push((url.clone(), content.clone()));
+                    // Store with the original file_index to preserve correct ordering
+                    downloaded_contents.push((url, content, original_file_index));
                 }
                 Ok(Err(e)) => {
-                    log::error!("File download {}/{} failed: {}", index + 1, results.len(), e);
-                    eprintln!("File download failed: {}", e);
+                    let error_msg = format!("File download {}/{} failed: {}", index + 1, total_results, e);
+                    log::error!("{}", error_msg);
+                    eprintln!("{}", error_msg);
+                    failed_downloads.push(error_msg);
                 }
                 Err(e) => {
-                    log::error!("Task {}/{} join error: {}", index + 1, results.len(), e);
-                    eprintln!("Task join error: {}", e);
+                    let error_msg = format!("Task {}/{} join error: {}", index + 1, total_results, e);
+                    log::error!("{}", error_msg);
+                    eprintln!("{}", error_msg);
+                    failed_downloads.push(error_msg);
                 }
             }
         }
+
+        // CRITICAL: If any files failed to download, return error BEFORE deleting old session
+        // We require ALL files to succeed for complete log data
+        if !failed_downloads.is_empty() {
+            let error_summary = format!(
+                "Failed to download {}/{} files for session {}. Complete log data requires all files. Errors:\n  {}",
+                failed_downloads.len(),
+                total_results,
+                session_name,
+                failed_downloads.join("\n  ")
+            );
+            log::error!("{}", error_summary);
+            eprintln!("{}", error_summary);
+            return Err(HttpFetchError::DownloadFailed {
+                url: session_name.clone(),
+                reason: error_summary,
+            });
+        }
+
+        // Sort by original file_index to ensure correct processing order
+        downloaded_contents.sort_by_key(|(_, _, index)| *index);
+        log::info!("Sorted {} downloaded files by original file_index", downloaded_contents.len());
 
         log::info!("Total downloaded: ~{} MB across {} files",
             total_downloaded_bytes / 1024 / 1024, downloaded_contents.len());
@@ -293,6 +325,65 @@ impl SessionDownloadCoordinator {
         progress_callback(ProgressStatus::Parsing { session: session_name.clone() });
         log::info!("[DB] Starting database operations for session {}", session_name);
 
+        // Generate session ID (needed for parsing)
+        let session_id = format!(
+            "session_{}_{}",
+            session_name.replace(|c: char| !c.is_alphanumeric() && c != '_', "_"),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        );
+
+        // CRITICAL: Parse BEFORE deleting old session to avoid data loss on parse errors
+        log::info!("Starting to parse {} downloaded files for session {}", downloaded_contents.len(), session_name);
+
+        // Clone data needed for spawn_blocking
+        let downloaded_contents_for_parse = downloaded_contents.clone();
+        let session_id_for_parse = session_id.clone();
+
+        // IMPORTANT: Use spawn_blocking for CPU-intensive parsing
+        let parse_results = tokio::task::spawn_blocking(move || {
+            let downloaded_count = downloaded_contents_for_parse.len();
+            let mut entries = Vec::new();
+            let mut parse_errors = Vec::new();
+
+            for (i, (file_url, html_content, file_index)) in downloaded_contents_for_parse.into_iter().enumerate() {
+                log::info!("[Parse {}/{}] Starting parse: {} ({} chars, file_index={})",
+                    i + 1, downloaded_count, file_url, html_content.len(), file_index);
+
+                match HtmlLogParser::parse_html_string(&html_content, &file_url, &session_id_for_parse, file_index) {
+                    Ok(parsed_entries) => {
+                        log::info!("[Parse {}/{}] Completed: {} entries from {} (file_index={})",
+                            i + 1, downloaded_count, parsed_entries.len(), file_url, file_index);
+                        entries.extend(parsed_entries);
+                    }
+                    Err(e) => {
+                        let error_msg = format!("[Parse {}/{}] FAILED for {}: {}", i + 1, downloaded_count, file_url, e);
+                        log::error!("{}", error_msg);
+                        eprintln!("{}", error_msg);
+                        parse_errors.push(error_msg);
+                    }
+                }
+            }
+
+            // CRITICAL: If any files failed to parse, return error
+            // We require ALL files to parse successfully for complete log data
+            if !parse_errors.is_empty() {
+                return Err(format!(
+                    "Failed to parse {}/{} files. Complete log data requires all files to parse. Errors:\n  {}",
+                    parse_errors.len(),
+                    downloaded_count,
+                    parse_errors.join("\n  ")
+                ));
+            }
+
+            Ok(entries)
+        }).await
+        .map_err(|e| HttpFetchError::ParseError(format!("Parse task failed: {}", e)))?
+        .map_err(|e| HttpFetchError::ParseError(format!("Parse failed: {}", e)))?;
+
+        let all_entries = parse_results;
+        log::info!("Total entries parsed for session {}: {} entries from {} files", session_name, all_entries.len(), downloaded_contents.len());
+
+        // CRITICAL: Only delete old session AFTER parsing succeeds
         // Delete existing session if any
         // Create a new connection for deletion to avoid lock issues
         match DatabaseManager::new(&db_path) {
@@ -313,45 +404,6 @@ impl SessionDownloadCoordinator {
                 println!("Warning: Could not create database connection for deletion: {}", e);
             }
         }
-
-        // Generate session ID
-        let session_id = format!(
-            "session_{}_{}",
-            session_name.replace(|c: char| !c.is_alphanumeric() && c != '_', "_"),
-            Utc::now().timestamp_nanos_opt().unwrap_or_default()
-        );
-
-        // Parse all downloaded files - use blocking task for CPU-intensive work
-        log::info!("Starting to parse {} downloaded files for session {}", downloaded_contents.len(), session_name);
-
-        // Clone data needed for spawn_blocking
-        let downloaded_contents_for_parse = downloaded_contents.clone();
-        let session_id_for_parse = session_id.clone();
-
-        // IMPORTANT: Use spawn_blocking for CPU-intensive parsing
-        let parse_results = tokio::task::spawn_blocking(move || {
-            let downloaded_count = downloaded_contents_for_parse.len();
-            let mut entries = Vec::new();
-            for (file_index, (file_url, html_content)) in downloaded_contents_for_parse.into_iter().enumerate() {
-                log::info!("[Parse {}/{}] Starting parse: {} ({} chars)", file_index + 1, downloaded_count, file_url, html_content.len());
-
-                match HtmlLogParser::parse_html_string(&html_content, &file_url, &session_id_for_parse, file_index) {
-                    Ok(parsed_entries) => {
-                        log::info!("[Parse {}/{}] Completed: {} entries from {}", file_index + 1, downloaded_count, parsed_entries.len(), file_url);
-                        entries.extend(parsed_entries);
-                    }
-                    Err(e) => {
-                        log::error!("[Parse {}/{}] FAILED: {}", file_index + 1, downloaded_count, e);
-                        eprintln!("Failed to parse {}: {}", file_url, e);
-                    }
-                }
-            }
-            entries
-        }).await
-        .map_err(|e| HttpFetchError::ParseError(format!("Parse task failed: {}", e)))?;
-
-        let all_entries = parse_results;
-        log::info!("Total entries parsed for session {}: {} entries from {} files", session_name, all_entries.len(), downloaded_contents.len());
 
         if all_entries.is_empty() {
             log::error!("ERROR: No valid log entries found for session {}! Downloaded {} files but parsed 0 entries.", session_name, downloaded_contents.len());
