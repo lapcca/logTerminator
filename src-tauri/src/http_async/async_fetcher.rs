@@ -118,7 +118,7 @@ impl AsyncHttpLogFetcher {
             if downloaded % (5 * 1024 * 1024) == 0 || downloaded == content_length {
                 println!("[ASYNC_DL] Download progress: {} / {} bytes ({}%)",
                     downloaded, content_length,
-                    if content_length > 0 { (downloaded * 100 / content_length) } else { 0 });
+                    if content_length > 0 { downloaded * 100 / content_length } else { 0 });
             }
         }
 

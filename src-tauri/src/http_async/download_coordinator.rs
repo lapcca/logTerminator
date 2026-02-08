@@ -161,13 +161,15 @@ impl SessionDownloadCoordinator {
         // Track file status with HashMap for O(1) lookups
         let file_status = Arc::new(std::sync::Mutex::new(HashMap::new()));
 
-        for (file_url, _file_index) in &log_files {
+        for (file_url, _file_index) in log_files.iter() {
             let semaphore = file_semaphore.clone();
             let fetcher_clone = fetcher.clone();
             let status = file_status.clone();
             let bytes_clone = bytes_downloaded.clone();
             let speed_clone = speed_calculator.clone();
+            let progress_cb_clone = progress_callback.clone();
             let file_url = file_url.clone();
+            let log_files_len = log_files.len();
 
             let task = tokio::spawn(async move {
                 let _permit = semaphore.acquire().await
@@ -188,14 +190,33 @@ impl SessionDownloadCoordinator {
                     &file_url,
                     max_retries,
                     bytes_clone,
-                    speed_clone,
+                    speed_clone.clone(),
                 ).await {
                     Ok(result) => {
                         // Update status to completed
-                        let mut st = status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
-                        if let Some(fs) = st.get_mut(&file_url) {
-                            fs.status = FileDownloadStatus::Completed;
+                        {
+                            let mut st = status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
+                            if let Some(fs) = st.get_mut(&file_url) {
+                                fs.status = FileDownloadStatus::Completed;
+                            }
+                            log::info!("[DL] Completed: {}", file_url);
                         }
+
+                        // Emit progress after each file completes
+                        let progress_vec = {
+                            let st = status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
+                            st.values().cloned().collect::<Vec<_>>()
+                        };
+                        progress_cb_clone(ProgressStatus::Downloading {
+                            total_sessions,
+                            current_session: session_num,
+                            total_files: log_files_len,
+                            completed_files: progress_vec.iter().filter(|f| matches!(f.status, FileDownloadStatus::Completed)).count(),
+                            failed_files: progress_vec.iter().filter(|f| matches!(f.status, FileDownloadStatus::Failed)).count(),
+                            speed: speed_clone.format_speed(),
+                            files: progress_vec,
+                        });
+
                         Ok((file_url, result.content))
                     }
                     Err(e) => {
@@ -251,23 +272,26 @@ impl SessionDownloadCoordinator {
         log::info!("Total downloaded: ~{} MB across {} files",
             total_downloaded_bytes / 1024 / 1024, downloaded_contents.len());
 
-        // Update progress
-        let status_map = file_status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
-        let status_vec: Vec<FileStatus> = status_map.values().cloned().collect();
-        drop(status_map); // Release lock before callback
+        // Update progress - do this BEFORE any async calls that might hold locks
+        {
+            let status_map = file_status.lock().map_err(|e| HttpFetchError::ParseError(format!("Mutex error: {}", e)))?;
+            let status_vec: Vec<FileStatus> = status_map.values().cloned().collect();
+            drop(status_map); // Release lock before any async operations
 
-        progress_callback(ProgressStatus::Downloading {
-            total_sessions,
-            current_session: session_num,
-            total_files: status_vec.len(),
-            completed_files: status_vec.iter().filter(|f| matches!(f.status, FileDownloadStatus::Completed)).count(),
-            failed_files: status_vec.iter().filter(|f| matches!(f.status, FileDownloadStatus::Failed)).count(),
-            speed: speed_calculator.format_speed(),
-            files: status_vec,
-        });
+            progress_callback(ProgressStatus::Downloading {
+                total_sessions,
+                current_session: session_num,
+                total_files: status_vec.len(),
+                completed_files: status_vec.iter().filter(|f| matches!(f.status, FileDownloadStatus::Completed)).count(),
+                failed_files: status_vec.iter().filter(|f| matches!(f.status, FileDownloadStatus::Failed)).count(),
+                speed: speed_calculator.format_speed(),
+                files: status_vec,
+            });
+        }
 
         // Process and store in database
         progress_callback(ProgressStatus::Parsing { session: session_name.clone() });
+        log::info!("[DB] Starting database operations for session {}", session_name);
 
         // Delete existing session if any
         // Create a new connection for deletion to avoid lock issues
@@ -297,20 +321,36 @@ impl SessionDownloadCoordinator {
             Utc::now().timestamp_nanos_opt().unwrap_or_default()
         );
 
-        // Parse all downloaded files
-        let mut all_entries = Vec::new();
+        // Parse all downloaded files - use blocking task for CPU-intensive work
         log::info!("Starting to parse {} downloaded files for session {}", downloaded_contents.len(), session_name);
 
-        for (file_index, (file_url, html_content)) in downloaded_contents.iter().enumerate() {
-            log::info!("[Parse {}/{}] Parsing file: {} ({} chars)", file_index + 1, downloaded_contents.len(), file_url, html_content.len());
+        // Clone data needed for spawn_blocking
+        let downloaded_contents_for_parse = downloaded_contents.clone();
+        let session_id_for_parse = session_id.clone();
 
-            let entries = HtmlLogParser::parse_html_string(html_content, file_url, &session_id, file_index)
-                .map_err(|e| HttpFetchError::ParseError(format!("Failed to parse {}: {}", file_url, e)))?;
+        // IMPORTANT: Use spawn_blocking for CPU-intensive parsing
+        let parse_results = tokio::task::spawn_blocking(move || {
+            let downloaded_count = downloaded_contents_for_parse.len();
+            let mut entries = Vec::new();
+            for (file_index, (file_url, html_content)) in downloaded_contents_for_parse.into_iter().enumerate() {
+                log::info!("[Parse {}/{}] Starting parse: {} ({} chars)", file_index + 1, downloaded_count, file_url, html_content.len());
 
-            log::info!("[Parse {}/{}] Extracted {} entries from {}", file_index + 1, downloaded_contents.len(), entries.len(), file_url);
-            all_entries.extend(entries);
-        }
+                match HtmlLogParser::parse_html_string(&html_content, &file_url, &session_id_for_parse, file_index) {
+                    Ok(parsed_entries) => {
+                        log::info!("[Parse {}/{}] Completed: {} entries from {}", file_index + 1, downloaded_count, parsed_entries.len(), file_url);
+                        entries.extend(parsed_entries);
+                    }
+                    Err(e) => {
+                        log::error!("[Parse {}/{}] FAILED: {}", file_index + 1, downloaded_count, e);
+                        eprintln!("Failed to parse {}: {}", file_url, e);
+                    }
+                }
+            }
+            entries
+        }).await
+        .map_err(|e| HttpFetchError::ParseError(format!("Parse task failed: {}", e)))?;
 
+        let all_entries = parse_results;
         log::info!("Total entries parsed for session {}: {} entries from {} files", session_name, all_entries.len(), downloaded_contents.len());
 
         if all_entries.is_empty() {
@@ -319,60 +359,88 @@ impl SessionDownloadCoordinator {
             return Ok(session_id);
         }
 
-        // Create a new database connection for this session
-        let mut db_manager = DatabaseManager::new(&db_path)
-            .map_err(|e| HttpFetchError::ParseError(format!("Failed to create database connection: {}", e)))?;
-
         // Create test session
+        let entry_count = all_entries.len();
         let test_session = crate::log_parser::TestSession {
             id: session_id.clone(),
             name: session_name.clone(),
             directory_path: url.clone(),
             file_count: log_files.len(),
-            total_entries: all_entries.len(),
+            total_entries: entry_count,
             created_at: Some(Utc::now()),
             last_parsed_at: Some(Utc::now()),
             source_type: Some("http".to_string()),
         };
 
-        db_manager.create_test_session(&test_session)
-            .map_err(|e| HttpFetchError::ParseError(format!("Failed to create session: {}", e)))?;
+        // Clone test_session for spawn_blocking
+        let test_session_clone = test_session.clone();
 
-        let inserted_ids = db_manager.insert_entries(&all_entries)
-            .map_err(|e| HttpFetchError::ParseError(format!("Failed to insert entries: {}", e)))?;
+        log::info!("Creating session in database: {} with {} entries", session_id, entry_count);
 
-        // Assign IDs to entries for auto-bookmark detection
-        let mut entries_with_ids = all_entries.clone();
-        for (i, entry_id) in inserted_ids.iter().enumerate() {
-            if i < entries_with_ids.len() {
-                entries_with_ids[i].id = Some(*entry_id);
+        // Clone data needed for logging after spawn_blocking
+        let session_name_for_log = session_name.clone();
+        let log_files_count = log_files.len();
+
+        // Move all_entries into spawn_blocking
+        tokio::task::spawn_blocking(move || {
+            let mut db_manager = match DatabaseManager::new(&db_path) {
+                Ok(manager) => manager,
+                Err(e) => {
+                    log::error!("Failed to create database connection: {}", e);
+                    return;
+                }
+            };
+
+            if let Err(e) = db_manager.create_test_session(&test_session_clone) {
+                log::error!("Failed to create session: {}", e);
+                return;
             }
-        }
 
-        // Find and create auto-bookmarks
-        use crate::bookmark_utils::{create_auto_bookmark, find_auto_bookmark_markers};
-        let auto_markers = find_auto_bookmark_markers(&entries_with_ids);
-        if !auto_markers.is_empty() {
-            println!("Found {} auto-bookmark markers", auto_markers.len());
-            for (entry_id, title) in &auto_markers {
-                let bookmark = create_auto_bookmark(*entry_id, title.clone());
-                match db_manager.add_bookmark(&bookmark) {
-                    Ok(_) => {
-                        println!("Created auto-bookmark: '{}'", title);
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: Failed to create auto-bookmark '{}': {}", title, e);
+            log::info!("Session created, inserting {} entries...", all_entries.len());
+
+            let inserted_ids = match db_manager.insert_entries(&all_entries) {
+                Ok(ids) => {
+                    log::info!("Successfully inserted {} entries", ids.len());
+                    ids
+                }
+                Err(e) => {
+                    log::error!("Failed to insert entries: {}", e);
+                    return;
+                }
+            };
+
+            // Assign IDs to entries for auto-bookmark detection
+            // IMPORTANT: Modify entries in place to avoid cloning
+            let mut entries_with_ids = all_entries;
+            for (i, entry_id) in inserted_ids.iter().enumerate() {
+                if i < entries_with_ids.len() {
+                    entries_with_ids[i].id = Some(*entry_id);
+                }
+            }
+
+            // Find and create auto-bookmarks
+            use crate::bookmark_utils::{create_auto_bookmark, find_auto_bookmark_markers};
+            let auto_markers = find_auto_bookmark_markers(&entries_with_ids);
+            if !auto_markers.is_empty() {
+                log::info!("Found {} auto-bookmark markers, creating bookmarks...", auto_markers.len());
+                for (entry_id, title) in &auto_markers {
+                    let bookmark = create_auto_bookmark(*entry_id, title.clone());
+                    match db_manager.add_bookmark(&bookmark) {
+                        Ok(_) => log::debug!("Created auto-bookmark: '{}'", title),
+                        Err(e) => log::warn!("Failed to create auto-bookmark '{}': {}", title, e),
                     }
                 }
             }
-        }
+
+            log::info!("Database operations completed for session {}", session_name_for_log);
+        }).await
+        .map_err(|e| HttpFetchError::ParseError(format!("Database task failed: {}", e)))?;
 
         println!(
-            "Completed session {}: {} files, {} entries, {} auto-bookmarks",
+            "Completed session {}: {} files, {} entries",
             session_name,
-            log_files.len(),
-            all_entries.len(),
-            auto_markers.len()
+            log_files_count,
+            entry_count
         );
 
         Ok(session_id)
