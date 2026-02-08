@@ -361,9 +361,9 @@ const totalPages = computed(() => Math.ceil(totalEntries.value / options.itemsPe
 
 // Show source dialog
 async function openDirectory() {
-  logSourceInput.value = ''
+  // Don't clear logSourceInput - keep the last loaded directory if available
   showSourceDialog.value = true
-  // Focus will be handled by the watch on showSourceDialog
+  // Focus will be handled by the @opened event handler
 }
 
 // Fetch all log levels for the current session
@@ -549,6 +549,14 @@ async function loadFromHttpUrl(url, selectedTests) {
       currentSession.value = sessionIds[0]
       await refreshLogs()
       loadingMessage.value = `Loaded ${sessionIds.length} test session(s) from server`
+
+      // Save the last used directory/URL
+      try {
+        await invoke('save_last_directory', { directory: url })
+        console.log('[App] Saved last directory:', url)
+      } catch (error) {
+        console.warn('Failed to save last directory:', error)
+      }
     }
   } catch (error) {
     console.error('Error loading from HTTP:', error)
@@ -592,6 +600,14 @@ async function loadFromDirectory(directoryPath, selectedTests) {
       currentSession.value = sessionIds[0]
       await refreshLogs()
       loadingMessage.value = `Loaded ${sessionIds.length} test session(s)`
+
+      // Save the last used directory/URL
+      try {
+        await invoke('save_last_directory', { directory: directoryPath })
+        console.log('[App] Saved last directory:', directoryPath)
+      } catch (error) {
+        console.warn('Failed to save last directory:', error)
+      }
     }
   } catch (error) {
     console.error('Error loading from directory:', error)
@@ -1236,7 +1252,18 @@ function isHighlighted(entryId) {
 }
 
 // Load sessions on mount
-onMounted(() => {
+onMounted(async () => {
+  // Load last used directory
+  try {
+    const lastDir = await invoke('get_last_directory')
+    if (lastDir && lastDir.length > 0) {
+      console.log('[App] Last directory loaded:', lastDir)
+      logSourceInput.value = lastDir
+    }
+  } catch (error) {
+    console.warn('Failed to load last directory:', error)
+  }
+
   loadSessions()
   loadSidebarWidth()
 

@@ -506,6 +506,61 @@ fn get_entry_page(
         .map_err(|e| format!("Failed to get entry page: {}", e))
 }
 
+/// Save the last used log directory
+#[tauri::command]
+fn save_last_directory(directory: String) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+    use std::env;
+
+    // Get the app data directory
+    let exe_path = env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {}", e))?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or("Cannot determine executable directory")?;
+
+    let config_file = exe_dir.join("last_log_directory.txt");
+
+    let mut file = File::create(&config_file)
+        .map_err(|e| format!("Failed to create config file: {}", e))?;
+
+    file.write_all(directory.as_bytes())
+        .map_err(|e| format!("Failed to write directory: {}", e))?;
+
+    log::info!("Saved last directory: {}", directory);
+    Ok(())
+}
+
+/// Get the last used log directory
+#[tauri::command]
+fn get_last_directory() -> Result<String, String> {
+    use std::fs;
+    use std::env;
+
+    // Get the app data directory
+    let exe_path = env::current_exe()
+        .map_err(|e| format!("Failed to get exe path: {}", e))?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or("Cannot determine executable directory")?;
+
+    let config_file = exe_dir.join("last_log_directory.txt");
+
+    match fs::read_to_string(&config_file) {
+        Ok(content) => {
+            let directory = content.trim().to_string();
+            if !directory.is_empty() {
+                log::info!("Retrieved last directory: {}", directory);
+                Ok(directory)
+            } else {
+                Ok(String::new())
+            }
+        }
+        Err(_) => Ok(String::new()), // File doesn't exist or can't be read, return empty string
+    }
+}
+
 /// Initialize logging to both file and console
 fn init_logging() -> std::io::Result<()> {
     use std::fs::OpenOptions;
@@ -590,7 +645,9 @@ pub fn run() {
             get_sessions,
             get_session_log_levels,
             ensure_auto_bookmarks,
-            delete_session
+            delete_session,
+            save_last_directory,
+            get_last_directory
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

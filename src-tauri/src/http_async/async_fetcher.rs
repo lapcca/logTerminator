@@ -3,6 +3,7 @@ use reqwest::Url;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use std::collections::HashMap;
 use super::types::DownloadResult;
 use super::progress_tracker::SpeedCalculator;
 use crate::http_log_fetcher::HttpFetchError;
@@ -15,6 +16,12 @@ const CHUNK_TIMEOUT_SECS: u64 = 60;
 
 /// Threshold for using chunked download (files larger than 10MB)
 const CHUNKED_DOWNLOAD_THRESHOLD: u64 = 10 * 1024 * 1024;
+
+/// Maximum concurrent chunk downloads
+const MAX_CONCURRENT_CHUNKS: usize = 3;
+
+/// Maximum retries per chunk
+const MAX_CHUNK_RETRIES: u32 = 3;
 
 /// Async HTTP log fetcher with retry and chunked download support
 #[derive(Clone)]
@@ -72,7 +79,7 @@ impl AsyncHttpLogFetcher {
                 tokio::time::sleep(Duration::from_millis(backoff)).await;
             }
 
-            match self.fetch_file_once(url, &bytes_downloaded, &speed_calculator, retry_count).await {
+            match self.fetch_file_once(url, bytes_downloaded.clone(), speed_calculator.clone(), retry_count).await {
                 Ok(result) => {
                     if retry_count > 0 {
                         log::info!("[ASYNC_DL] Success on retry {} for {}", retry_count, url);
@@ -106,8 +113,8 @@ impl AsyncHttpLogFetcher {
     async fn fetch_file_once(
         &self,
         url: &str,
-        bytes_downloaded: &AtomicU64,
-        speed_calculator: &SpeedCalculator,
+        bytes_downloaded: Arc<AtomicU64>,
+        speed_calculator: Arc<SpeedCalculator>,
         attempt_number: u32,
     ) -> Result<DownloadResult, HttpFetchError> {
         log::info!("[ASYNC_DL] [Attempt {}] Starting download: {}", attempt_number, url);
@@ -121,7 +128,7 @@ impl AsyncHttpLogFetcher {
         if use_chunked {
             log::info!("[ASYNC_DL] [Attempt {}] Using chunked download: {} bytes ({} MB), Range support: yes",
                 attempt_number, content_length, content_length / 1024 / 1024);
-            self.fetch_file_chunked(url, content_length, bytes_downloaded, speed_calculator, attempt_number).await
+            self.fetch_file_chunked_parallel(url, content_length, bytes_downloaded, speed_calculator, attempt_number).await
         } else {
             if content_length >= CHUNKED_DOWNLOAD_THRESHOLD {
                 log::warn!("[ASYNC_DL] [Attempt {}] File is large ({} MB) but server doesn't support Range requests, using simple download",
@@ -160,51 +167,143 @@ impl AsyncHttpLogFetcher {
         Ok((content_length, supports_range))
     }
 
-    /// Fetch file using chunked download with Range requests
-    async fn fetch_file_chunked(
+    /// Fetch file using parallel chunked download with Range requests
+    async fn fetch_file_chunked_parallel(
         &self,
         url: &str,
         content_length: u64,
-        bytes_downloaded: &AtomicU64,
-        speed_calculator: &SpeedCalculator,
+        bytes_downloaded: Arc<AtomicU64>,
+        speed_calculator: Arc<SpeedCalculator>,
         attempt_number: u32,
     ) -> Result<DownloadResult, HttpFetchError> {
         let start_time = std::time::Instant::now();
         let total_chunks = (content_length + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
-        log::info!("[ASYNC_DL] [Attempt {}] Chunked download: {} bytes in {} chunks ({} MB/chunk)",
-            attempt_number, content_length, total_chunks, CHUNK_SIZE / 1024 / 1024);
+        log::info!("[ASYNC_DL] [Attempt {}] Parallel chunked download: {} bytes in {} chunks ({} MB/chunk, {} concurrent)",
+            attempt_number, content_length, total_chunks, CHUNK_SIZE / 1024 / 1024, MAX_CONCURRENT_CHUNKS);
 
-        let mut chunks = Vec::new();
-        let mut total_downloaded = 0u64;
+        // Create a semaphore to limit concurrent downloads
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CHUNKS));
+        let url_str = url.to_string();
+        let client = self.client.clone();
 
+        // Track chunk results: chunk_index -> (data, retry_count)
+        let chunk_results = Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let mut download_tasks = Vec::new();
+
+        // Wrap in Arc for sharing across tasks
+        let bytes_downloaded = Arc::new(bytes_downloaded.clone());
+        let speed_calculator = Arc::new(speed_calculator.clone());
+
+        // Spawn download tasks for all chunks
         for chunk_index in 0..total_chunks {
-            let start = chunk_index * CHUNK_SIZE;
-            let end = std::cmp::min(start + CHUNK_SIZE - 1, content_length - 1);
+            let semaphore = semaphore.clone();
+            let client = client.clone();
+            let url = url_str.clone();
+            let chunk_results = chunk_results.clone();
+            let bytes_downloaded = bytes_downloaded.clone();
+            let speed_calculator = speed_calculator.clone();
 
-            match self.fetch_chunk(url, chunk_index, start, end, attempt_number).await {
-                Ok(chunk_data) => {
-                    let chunk_len = chunk_data.len() as u64;
-                    total_downloaded += chunk_len;
-                    bytes_downloaded.fetch_add(chunk_len, Ordering::Relaxed);
-                    speed_calculator.add_sample(bytes_downloaded.load(Ordering::Relaxed));
+            let task = tokio::spawn(async move {
+                // Acquire semaphore permit
+                let _permit = semaphore.acquire().await
+                    .map_err(|e| {
+                        log::error!("[ASYNC_DL] Failed to acquire semaphore: {}", e);
+                        HttpFetchError::DownloadFailed {
+                            url: url.clone(),
+                            reason: format!("Semaphore error: {}", e),
+                        }
+                    })?;
 
-                    let progress = (total_downloaded * 100) / content_length;
-                    log::debug!("[ASYNC_DL] [Attempt {}] Chunk {}/{} downloaded: {} bytes ({}% complete)",
-                        attempt_number, chunk_index + 1, total_chunks, chunk_len, progress);
+                let start = chunk_index * CHUNK_SIZE;
+                let end = std::cmp::min(start + CHUNK_SIZE - 1, content_length - 1);
 
-                    chunks.push(chunk_data);
+                // Download with chunk-level retry
+                let mut retry_count = 0u32;
+                let mut last_error = None;
+
+                while retry_count <= MAX_CHUNK_RETRIES {
+                    if retry_count > 0 {
+                        let backoff = 100 * (2_u64.pow(retry_count - 1));
+                        log::warn!("[ASYNC_DL] Chunk {} retry {}/{} after {}ms",
+                            chunk_index, retry_count, MAX_CHUNK_RETRIES, backoff);
+                        tokio::time::sleep(Duration::from_millis(backoff)).await;
+                    }
+
+                    match Self::fetch_chunk_single(client.clone(), url.clone(), chunk_index, start, end).await {
+                        Ok(chunk_data) => {
+                            let chunk_len = chunk_data.len() as u64;
+                            bytes_downloaded.fetch_add(chunk_len, Ordering::Relaxed);
+                            speed_calculator.add_sample(bytes_downloaded.load(Ordering::Relaxed));
+
+                            let progress = (bytes_downloaded.load(Ordering::Relaxed) * 100) / content_length;
+                            log::debug!("[ASYNC_DL] Chunk {}/{} downloaded: {} bytes ({}% complete)",
+                                chunk_index + 1, total_chunks, chunk_len, progress);
+
+                            // Store successful result
+                            {
+                                let mut results = chunk_results.lock().unwrap();
+                                results.insert(chunk_index, chunk_data);
+                            }
+                            return Ok::<(), HttpFetchError>(());
+                        }
+                        Err(e) => {
+                            log::warn!("[ASYNC_DL] Chunk {} attempt {}/{} failed: {}",
+                                chunk_index, retry_count + 1, MAX_CHUNK_RETRIES + 1, e);
+                            last_error = Some(e);
+                            retry_count += 1;
+                        }
+                    }
+                }
+
+                // All retries failed
+                let error = last_error.unwrap();
+                log::error!("[ASYNC_DL] Chunk {} failed after {} retries", chunk_index, MAX_CHUNK_RETRIES);
+                Err(error)
+            });
+
+            download_tasks.push(task);
+        }
+
+        // Wait for all chunks to complete
+        let mut failed_chunks = Vec::new();
+        for (chunk_index, task) in download_tasks.into_iter().enumerate() {
+            match task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(_e)) => {
+                    failed_chunks.push(chunk_index);
                 }
                 Err(e) => {
-                    log::error!("[ASYNC_DL] [Attempt {}] Failed to download chunk {}/{}: {}",
-                        attempt_number, chunk_index + 1, total_chunks, e);
+                    log::error!("[ASYNC_DL] Chunk {} task failed: {}", chunk_index, e);
+                    failed_chunks.push(chunk_index);
+                }
+            }
+        }
+
+        // Check if any chunks failed
+        if !failed_chunks.is_empty() {
+            return Err(HttpFetchError::DownloadFailed {
+                url: url.to_string(),
+                reason: format!("Failed to download {}/{} chunks: {:?}",
+                    failed_chunks.len(), total_chunks, failed_chunks),
+            });
+        }
+
+        // Collect all chunks in order
+        let results = chunk_results.lock().unwrap();
+        let mut chunks = Vec::with_capacity(total_chunks as usize);
+        for chunk_index in 0..total_chunks {
+            match results.get(&chunk_index) {
+                Some(chunk_data) => chunks.push(chunk_data.clone()),
+                None => {
                     return Err(HttpFetchError::DownloadFailed {
                         url: url.to_string(),
-                        reason: format!("Failed to download chunk {}/{}: {}", chunk_index + 1, total_chunks, e),
+                        reason: format!("Chunk {} is missing from results", chunk_index),
                     });
                 }
             }
         }
+        drop(results);
 
         // Merge all chunks
         let total_size = chunks.iter().map(|c| c.len()).sum();
@@ -226,27 +325,25 @@ impl AsyncHttpLogFetcher {
         };
 
         let elapsed = start_time.elapsed().as_secs();
-        log::info!("[ASYNC_DL] [Attempt {}] Chunked download completed in {}s: {} bytes, {} chars",
-            attempt_number, elapsed, total_downloaded, final_content.len());
+        log::info!("[ASYNC_DL] [Attempt {}] Parallel chunked download completed in {}s: {} bytes, {} chars",
+            attempt_number, elapsed, bytes_downloaded.load(Ordering::Relaxed), final_content.len());
 
-        Ok(DownloadResult::new(url.to_string(), final_content, total_downloaded))
+        Ok(DownloadResult::new(url.to_string(), final_content, bytes_downloaded.load(Ordering::Relaxed)))
     }
 
-    /// Fetch a single chunk using Range request
-    async fn fetch_chunk(
-        &self,
-        url: &str,
+    /// Fetch a single chunk using Range request (static method for use in spawned tasks)
+    async fn fetch_chunk_single(
+        client: Client,
+        url: String,
         chunk_index: u64,
         start: u64,
         end: u64,
-        attempt_number: u32,
     ) -> Result<Vec<u8>, HttpFetchError> {
         let range_header = format!("bytes={}-{}", start, end);
-        log::trace!("[ASYNC_DL] [Attempt {}] Fetching chunk {}: Range: {}",
-            attempt_number, chunk_index, range_header);
+        log::trace!("[ASYNC_DL] Fetching chunk {}: Range: {}", chunk_index, range_header);
 
-        let response = self.client
-            .get(url)
+        let response = client
+            .get(&url)
             .header("Range", range_header)
             .send()
             .await
@@ -255,7 +352,7 @@ impl AsyncHttpLogFetcher {
         // Check for 206 Partial Content
         if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
             return Err(HttpFetchError::DownloadFailed {
-                url: url.to_string(),
+                url,
                 reason: format!("Expected 206 Partial Content, got {}", response.status()),
             });
         }
@@ -271,8 +368,8 @@ impl AsyncHttpLogFetcher {
     async fn fetch_file_simple(
         &self,
         url: &str,
-        bytes_downloaded: &AtomicU64,
-        speed_calculator: &SpeedCalculator,
+        bytes_downloaded: Arc<AtomicU64>,
+        speed_calculator: Arc<SpeedCalculator>,
         attempt_number: u32,
     ) -> Result<DownloadResult, HttpFetchError> {
         log::info!("[ASYNC_DL] [Attempt {}] Starting simple download: {}", attempt_number, url);

@@ -477,9 +477,8 @@ impl SessionDownloadCoordinator {
                 log::info!("Found {} auto-bookmark markers, creating bookmarks...", auto_markers.len());
                 for (entry_id, title) in &auto_markers {
                     let bookmark = create_auto_bookmark(*entry_id, title.clone());
-                    match db_manager.add_bookmark(&bookmark) {
-                        Ok(_) => log::debug!("Created auto-bookmark: '{}'", title),
-                        Err(e) => log::warn!("Failed to create auto-bookmark '{}': {}", title, e),
+                    if let Err(e) = db_manager.add_bookmark(&bookmark) {
+                        log::warn!("Failed to create auto-bookmark '{}': {}", title, e);
                     }
                 }
             }
