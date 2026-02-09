@@ -489,51 +489,218 @@ impl DatabaseManager {
         level_iter.collect()
     }
 
+    /// Query entries with failure anchor markers for a session.
+    ///
+    /// Returns entry IDs where message ends with [FAIL] marker.
+    fn query_failure_entries(&self, session_id: &str) -> SqlResult<Vec<i64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id FROM log_entries
+             WHERE test_session_id = ? AND message LIKE '%[FAIL]'
+             ORDER BY timestamp ASC"
+        )?;
+
+        let entry_iter = stmt.query_map([session_id], |row| {
+            Ok(row.get::<_, i64>(0)?)
+        })?;
+
+        entry_iter.collect()
+    }
+
+    /// Get existing bookmark for a specific entry.
+    ///
+    /// Returns the bookmark and its associated log entry if found.
+    fn get_bookmark_for_entry(&self, entry_id: i64) -> SqlResult<Option<(Bookmark, LogEntry)>> {
+        let query = "
+            SELECT b.id, b.log_entry_id, b.title, b.notes, b.color,
+                   e.id, e.test_session_id, e.file_path, e.file_index,
+                   e.timestamp, e.level, e.stack, e.message, e.line_number
+            FROM bookmarks b
+            JOIN log_entries e ON b.log_entry_id = e.id
+            WHERE b.log_entry_id = ?
+        ";
+
+        let mut stmt = self.conn.prepare(query)?;
+
+        let result = stmt.query_row([entry_id], |row| {
+            let bookmark = Bookmark {
+                id: Some(row.get(0)?),
+                log_entry_id: row.get(1)?,
+                title: row.get(2)?,
+                notes: row.get(3)?,
+                color: row.get(4)?,
+                created_at: None,
+            };
+
+            let entry = LogEntry {
+                id: row.get(5).ok(),
+                test_session_id: row.get(6)?,
+                file_path: row.get(7)?,
+                file_index: row.get(8)?,
+                timestamp: row.get(9)?,
+                level: row.get(10)?,
+                stack: row.get(11)?,
+                message: row.get(12)?,
+                line_number: row.get(13)?,
+                created_at: None,
+            };
+
+            Ok((bookmark, entry))
+        });
+
+        match result {
+            Ok(pair) => Ok(Some(pair)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Update bookmark color and title.
+    ///
+    /// Used to upgrade existing bookmarks to failure status.
+    fn update_bookmark_color_and_title(&self, bookmark_id: i64, color: &str, title: &str) -> SqlResult<()> {
+        self.conn.execute(
+            "UPDATE bookmarks SET color = ?, title = ? WHERE id = ?",
+            params![color, title, bookmark_id],
+        )?;
+        Ok(())
+    }
+
     /// Auto-bookmark entries for a session that haven't been bookmarked yet.
     /// This is called when switching to a session to ensure bookmarks are created.
     ///
-    /// Two patterns are handled:
-    /// 1. Messages containing ###TEXT### pattern (bookmark with "TEXT" as title)
-    /// 2. Log entries with MARKER level (bookmark with full message as title)
-    /// If both match, ### pattern takes priority.
+    /// Priority order:
+    /// 1. Failure anchors ([FAIL] marker) - Red (#F56C6C), "Failure" title
+    /// 2. STEP entries (MARKER level with [STEP in message) - Dark Turquoise (#00CED1)
+    /// 3. ###TEXT### pattern - Transparent background
+    /// 4. MARKER level (other) - Transparent background
+    ///
+    /// Higher priority bookmarks will override lower priority ones if already bookmarked.
     pub fn ensure_auto_bookmarks_for_session(&self, session_id: &str) -> SqlResult<Vec<Bookmark>> {
         use regex::Regex;
 
         let re = Regex::new(r"###(.+?)###").unwrap();
         let mut created_bookmarks = Vec::new();
 
-        // Query all entries that should be auto-bookmarked:
-        // 1. Messages containing ###TEXT### pattern
-        // 2. Entries with MARKER level
-        // Then filter out those that already have bookmarks
+        // === PRIORITY 1: Failure Anchors ===
+        let failure_entry_ids = self.query_failure_entries(session_id)?;
+        for entry_id in failure_entry_ids {
+            if let Some((existing_bookmark, _)) = self.get_bookmark_for_entry(entry_id)? {
+                if existing_bookmark.color != Some("#F56C6C".to_string()) {
+                    self.update_bookmark_color_and_title(
+                        existing_bookmark.id.unwrap(),
+                        "#F56C6C",
+                        "Failure",
+                    )?;
+                    let mut updated = existing_bookmark.clone();
+                    updated.color = Some("#F56C6C".to_string());
+                    updated.title = Some("Failure".to_string());
+                    created_bookmarks.push(updated);
+                }
+            } else {
+                let bookmark = Bookmark {
+                    id: None,
+                    log_entry_id: entry_id,
+                    title: Some("Failure".to_string()),
+                    notes: None,
+                    color: Some("#F56C6C".to_string()),
+                    created_at: None,
+                };
+                let bookmark_id = self.add_bookmark(&bookmark)?;
+                let mut created = bookmark;
+                created.id = Some(bookmark_id);
+                created_bookmarks.push(created);
+            }
+        }
+
+        // === PRIORITY 2: STEP Entries ===
+        // Query MARKER level entries with [STEP in message (but not failures)
+        let step_query = "
+            SELECT e.id, e.message,
+                   (SELECT COUNT(*) FROM bookmarks b WHERE b.log_entry_id = e.id) as has_bookmark
+            FROM log_entries e
+            WHERE e.test_session_id = ?
+              AND e.level = 'MARKER'
+              AND e.message LIKE '%[STEP%'
+              AND e.message NOT LIKE '%[FAIL]'
+            ORDER BY e.timestamp ASC
+        ";
+
+        {
+            let mut stmt = self.conn.prepare(step_query)?;
+            let step_iter = stmt.query_map([session_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?;
+
+            for step_result in step_iter {
+                let (entry_id, message, has_bookmark) = step_result?;
+
+                if has_bookmark > 0 {
+                    // Check if it has the right color, update if not
+                    if let Some((existing_bookmark, _)) = self.get_bookmark_for_entry(entry_id)? {
+                        if existing_bookmark.color != Some("#00CED1".to_string()) {
+                            self.update_bookmark_color_and_title(
+                                existing_bookmark.id.unwrap(),
+                                "#00CED1",
+                                &message,
+                            )?;
+                            let mut updated = existing_bookmark.clone();
+                            updated.color = Some("#00CED1".to_string());
+                            updated.title = Some(message.clone());
+                            created_bookmarks.push(updated);
+                        }
+                    }
+                } else {
+                    // Create new STEP bookmark
+                    let bookmark = Bookmark {
+                        id: None,
+                        log_entry_id: entry_id,
+                        title: Some(message.clone()),
+                        notes: None,
+                        color: Some("#00CED1".to_string()), // Dark Turquoise
+                        created_at: None,
+                    };
+                    let bookmark_id = self.add_bookmark(&bookmark)?;
+                    let mut created = bookmark;
+                    created.id = Some(bookmark_id);
+                    created_bookmarks.push(created);
+                }
+            }
+        }
+
+        // === PRIORITY 3 & 4: ###TEXT### pattern and other MARKER level ===
+        // Skip entries that are already bookmarked (including STEP and Failure)
         let query = "
             SELECT e.id, e.message, e.level,
                    (SELECT COUNT(*) FROM bookmarks b WHERE b.log_entry_id = e.id) as has_bookmark
             FROM log_entries e
             WHERE e.test_session_id = ?
               AND (e.message LIKE '%###%' OR e.level = 'MARKER')
+              AND e.message NOT LIKE '%[FAIL]'
+              AND e.message NOT LIKE '%[STEP%'
             ORDER BY e.timestamp ASC
         ";
 
         let mut stmt = self.conn.prepare(query)?;
         let entry_iter = stmt.query_map([session_id], |row| {
             Ok((
-                row.get::<_, i64>(0)?,   // id
-                row.get::<_, String>(1)?, // message
-                row.get::<_, String>(2)?, // level
-                row.get::<_, i64>(3)?,   // has_bookmark (count)
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
             ))
         })?;
 
         for entry_result in entry_iter {
             let (entry_id, message, level, has_bookmark) = entry_result?;
 
-            // Skip if already bookmarked
             if has_bookmark > 0 {
                 continue;
             }
 
-            // Determine title: ###TEXT### pattern takes priority, then MARKER level
             let title = if let Some(caps) = re.captures(&message) {
                 if let Some(title_match) = caps.get(1) {
                     let extracted = title_match.as_str().trim().to_string();
@@ -554,16 +721,15 @@ impl DatabaseManager {
             } else if level == "MARKER" {
                 message.clone()
             } else {
-                continue; // Should not happen due to WHERE clause, but skip if no title
+                continue;
             };
 
-            // Create bookmark
             let bookmark = Bookmark {
                 id: None,
                 log_entry_id: entry_id,
                 title: Some(final_title),
                 notes: None,
-                color: Some("#409EFF".to_string()), // Element Plus primary blue
+                color: None,
                 created_at: None,
             };
 

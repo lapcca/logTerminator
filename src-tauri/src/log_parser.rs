@@ -177,22 +177,32 @@ impl HtmlLogParser {
             };
 
             // Extract message from td.message
-            let message_text = if let Some(sel) = &message_selector {
-                row.select(sel)
-                    .next()
-                    .map(|el| el.text().collect::<String>().trim().to_string())
-                    .unwrap_or_default()
+            let (message_text, has_failure_anchor) = if let Some(sel) = &message_selector {
+                row.select(sel).next().map(|el| {
+                    let text = el.text().collect::<String>().trim().to_string();
+                    // Check inner HTML for failure anchor
+                    let inner_html = el.inner_html().to_string();
+                    let has_failure = inner_html.contains(r#"id="failureAnchor""#);
+                    (text, has_failure)
+                }).unwrap_or_default()
             } else {
                 let cells: Vec<_> = row.select(&td_any_selector).collect();
                 if !cells.is_empty() {
-                    cells[cells.len() - 1]
-                        .text()
-                        .collect::<String>()
-                        .trim()
-                        .to_string()
+                    let cell = cells[cells.len() - 1];
+                    let text = cell.text().collect::<String>().trim().to_string();
+                    let inner_html = cell.inner_html().to_string();
+                    let has_failure = inner_html.contains(r#"id="failureAnchor""#);
+                    (text, has_failure)
                 } else {
-                    String::new()
+                    (String::new(), false)
                 }
+            };
+
+            // Append [FAIL] marker if failure anchor was detected
+            let message_text = if has_failure_anchor {
+                format!("{} [FAIL]", message_text)
+            } else {
+                message_text
             };
 
             // Try to find hidden stack trace
@@ -352,22 +362,32 @@ impl HtmlLogParser {
             };
 
             // Extract message from td.message
-            let message_text = if let Some(sel) = &message_selector {
-                row.select(sel)
-                    .next()
-                    .map(|el| el.text().collect::<String>().trim().to_string())
-                    .unwrap_or_default()
+            let (message_text, has_failure_anchor) = if let Some(sel) = &message_selector {
+                row.select(sel).next().map(|el| {
+                    let text = el.text().collect::<String>().trim().to_string();
+                    // Check inner HTML for failure anchor
+                    let inner_html = el.inner_html().to_string();
+                    let has_failure = inner_html.contains(r#"id="failureAnchor""#);
+                    (text, has_failure)
+                }).unwrap_or_default()
             } else {
                 let cells: Vec<_> = row.select(&td_any_selector).collect();
                 if !cells.is_empty() {
-                    cells[cells.len() - 1]
-                        .text()
-                        .collect::<String>()
-                        .trim()
-                        .to_string()
+                    let cell = cells[cells.len() - 1];
+                    let text = cell.text().collect::<String>().trim().to_string();
+                    let inner_html = cell.inner_html().to_string();
+                    let has_failure = inner_html.contains(r#"id="failureAnchor""#);
+                    (text, has_failure)
                 } else {
-                    String::new()
+                    (String::new(), false)
                 }
+            };
+
+            // Append [FAIL] marker if failure anchor was detected
+            let message_text = if has_failure_anchor {
+                format!("{} [FAIL]", message_text)
+            } else {
+                message_text
             };
 
             // Try to find hidden stack trace

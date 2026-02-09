@@ -33,6 +33,7 @@ import {
 } from '@element-plus/icons-vue'
 import MessageTooltip from './components/MessageTooltip.vue'
 import TestSelectionDialog from './components/TestSelectionDialog.vue'
+import BookmarkColorPicker from './components/BookmarkColorPicker.vue'
 import { parsePythonStackTrace, getStackPreview, isPythonStackTrace } from './utils/stackParser.js'
 import { formatMessage } from './utils/messageFormatter.js'
 
@@ -275,6 +276,10 @@ const canOpen = computed(() => {
 const showEditBookmarkDialog = ref(false) // 控制编辑书签对话框显示
 const editingBookmark = ref(null) // 当前编辑的书签
 const editingBookmarkTitle = ref('') // 编辑时的临时标题
+
+// Bookmark color picker
+const bookmarkColorPickerVisible = ref(false) // 控制颜色选择器显示
+const bookmarkColorPickerEntryId = ref(null) // 当前正在添加书签的条目ID
 
 // Test selection dialog
 const showTestSelectionDialog = ref(false)
@@ -737,18 +742,40 @@ function truncateText(text, maxLength = 80) {
 }
 
 // Add bookmark
-async function addBookmark(entry) {
+async function addBookmark(entry, color = '#F59E0B') {
   try {
     await invoke('add_bookmark', {
       logEntryId: entry.id,
       title: truncateText(entry.message),
-      color: 'amber'
+      color: color
     })
     await loadBookmarks()
   } catch (error) {
     console.error('Error adding bookmark:', error)
     alert(`添加书签时出错：${error}`)
   }
+}
+
+// Show bookmark color picker
+function showBookmarkColorPicker(entry) {
+  bookmarkColorPickerEntryId.value = entry.id
+  bookmarkColorPickerVisible.value = true
+}
+
+// Handle bookmark color selection
+async function handleBookmarkColorSelected(color) {
+  const entry = logEntries.value.find(e => e.id === bookmarkColorPickerEntryId.value)
+  if (entry) {
+    await addBookmark(entry, color)
+  }
+  bookmarkColorPickerVisible.value = false
+  bookmarkColorPickerEntryId.value = null
+}
+
+// Close bookmark color picker
+function closeBookmarkColorPicker() {
+  bookmarkColorPickerVisible.value = false
+  bookmarkColorPickerEntryId.value = null
 }
 
 // Remove bookmark by ID
@@ -806,7 +833,7 @@ async function toggleBookmark(entry) {
   if (isBookmarked(entry.id)) {
     await removeBookmark(entry.id)
   } else {
-    await addBookmark(entry)
+    showBookmarkColorPicker(entry)
   }
 }
 
@@ -823,7 +850,7 @@ async function addBookmarksForSelected() {
         await invoke('add_bookmark', {
           logEntryId: entry.id,
           title: truncateText(entry.message),
-          color: 'amber'
+          color: '#E6A23C' // Orange for batch bookmarks
         })
       }
     }
@@ -967,6 +994,21 @@ function getLevelColor(level) {
     'TRACE': 'purple'
   }
   return colors[level] || 'grey'
+}
+
+// Get bookmark background color from hex color (adds opacity)
+function getBookmarkBackgroundColor(color) {
+  if (!color) return 'transparent' // No background for auto-bookmarks
+
+  // Convert hex to rgba with 0.15 opacity
+  const hex = color.replace('#', '')
+  if (hex.length === 6) {
+    const r = parseInt(hex.substring(0, 2), 16)
+    const g = parseInt(hex.substring(2, 4), 16)
+    const b = parseInt(hex.substring(4, 6), 16)
+    return `rgba(${r}, ${g}, ${b}, 0.15)`
+  }
+  return 'transparent'
 }
 
 // Handle pagination changes
@@ -1743,6 +1785,7 @@ function updatePinnedSize(size) {
                             v-for="bookmark in bookmarks"
                             :key="bookmark[0]?.id"
                             class="bookmark-item"
+                            :style="{ backgroundColor: getBookmarkBackgroundColor(bookmark[0]?.color) }"
                             @click="jumpToBookmark(bookmark)">
                             <el-avatar :size="20" class="bookmark-avatar">
                               <el-icon><StarFilled /></el-icon>
@@ -1913,9 +1956,27 @@ function updatePinnedSize(size) {
                 </el-table-column>
                 <el-table-column label="书签" width="80" align="center">
                   <template #default="{ row }">
+                    <el-popover
+                      v-if="!isBookmarked(row.id)"
+                      :visible="bookmarkColorPickerVisible && bookmarkColorPickerEntryId === row.id"
+                      placement="left"
+                      width="200"
+                      trigger="manual">
+                      <template #reference>
+                        <el-button
+                          :icon="Star"
+                          circle
+                          size="small"
+                          @click.stop="showBookmarkColorPicker(row)" />
+                      </template>
+                      <BookmarkColorPicker
+                        @color-selected="handleBookmarkColorSelected"
+                        @close="closeBookmarkColorPicker" />
+                    </el-popover>
                     <el-button
-                      :icon="isBookmarked(row.id) ? StarFilled : Star"
-                      :type="isBookmarked(row.id) ? 'warning' : 'default'"
+                      v-else
+                      :icon="StarFilled"
+                      type="warning"
                       circle
                       size="small"
                       @click.stop="toggleBookmark(row)" />
@@ -2145,7 +2206,7 @@ function updatePinnedSize(size) {
 }
 
 .bookmark-item:hover {
-  background-color: rgba(255, 193, 7, 0.15);
+  filter: brightness(0.9);
 }
 
 .bookmark-avatar {

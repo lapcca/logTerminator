@@ -74,7 +74,7 @@ pub fn find_auto_bookmark_markers(entries: &[LogEntry]) -> Vec<(i64, String)> {
     markers
 }
 
-/// Creates an auto-bookmark with the standard blue color.
+/// Creates an auto-bookmark without background color.
 ///
 /// # Arguments
 /// * `log_entry_id` - The ID of the log entry to bookmark
@@ -88,7 +88,49 @@ pub fn create_auto_bookmark(log_entry_id: i64, title: String) -> Bookmark {
         log_entry_id,
         title: Some(title),
         notes: None,
-        color: Some("#409EFF".to_string()), // Element Plus primary blue
+        color: None, // No background color for regular auto-bookmarks
+        created_at: Some(chrono::Utc::now()),
+    }
+}
+
+/// Finds failure anchor markers in log entries.
+///
+/// Scans all log entries for messages ending with `[FAIL]` marker,
+/// which indicates a failure anchor was detected during HTML parsing.
+///
+/// # Arguments
+/// * `entries` - Slice of log entries to scan for failure markers
+///
+/// # Returns
+/// * `Vec<i64>` - List of entry IDs that have failure anchors
+///
+/// # Examples
+/// ```
+/// use logterminator_lib::bookmark_utils::find_failure_anchor_markers;
+/// // Message: "Test failed assertion [FAIL]"
+/// // Returns: vec![entry_id]
+/// ```
+pub fn find_failure_anchor_markers(entries: &[LogEntry]) -> Vec<i64> {
+    entries.iter()
+        .filter(|entry| entry.message.ends_with("[FAIL]"))
+        .filter_map(|entry| entry.id)
+        .collect()
+}
+
+/// Creates a failure anchor bookmark with red color.
+///
+/// # Arguments
+/// * `log_entry_id` - The ID of the log entry to bookmark
+///
+/// # Returns
+/// * `Bookmark` - A bookmark with failure-specific properties
+pub fn create_failure_bookmark(log_entry_id: i64) -> Bookmark {
+    Bookmark {
+        id: None,
+        log_entry_id,
+        title: Some("Failure".to_string()),
+        notes: None,
+        color: Some("#F56C6C".to_string()), // Red for failures
         created_at: Some(chrono::Utc::now()),
     }
 }
@@ -201,7 +243,57 @@ mod tests {
         assert_eq!(bookmark.log_entry_id, 123);
         assert_eq!(bookmark.title, Some("Test Title".to_string()));
         assert_eq!(bookmark.notes, None);
-        assert_eq!(bookmark.color, Some("#409EFF".to_string()));
+        assert_eq!(bookmark.color, None); // No background color for regular auto-bookmarks
+        assert!(bookmark.created_at.is_some());
+    }
+
+    #[test]
+    fn test_find_failure_anchor_markers_basic() {
+        let entries = vec![
+            create_test_entry(1, "Test failed assertion [FAIL]"),
+            create_test_entry(2, "Normal log message"),
+            create_test_entry(3, "Another failure [FAIL]"),
+        ];
+
+        let failure_ids = find_failure_anchor_markers(&entries);
+
+        assert_eq!(failure_ids.len(), 2);
+        assert_eq!(failure_ids[0], 1);
+        assert_eq!(failure_ids[1], 3);
+    }
+
+    #[test]
+    fn test_find_failure_anchor_markers_no_id() {
+        let mut entry = create_test_entry(1, "Test failed [FAIL]");
+        entry.id = None;
+
+        let entries = vec![entry];
+        let failure_ids = find_failure_anchor_markers(&entries);
+
+        // Entries without IDs should be skipped
+        assert_eq!(failure_ids.len(), 0);
+    }
+
+    #[test]
+    fn test_find_failure_anchor_markers_none() {
+        let entries = vec![
+            create_test_entry(1, "Test failed"),
+            create_test_entry(2, "Normal log message"),
+        ];
+
+        let failure_ids = find_failure_anchor_markers(&entries);
+
+        assert_eq!(failure_ids.len(), 0);
+    }
+
+    #[test]
+    fn test_create_failure_bookmark() {
+        let bookmark = create_failure_bookmark(123);
+
+        assert_eq!(bookmark.log_entry_id, 123);
+        assert_eq!(bookmark.title, Some("Failure".to_string()));
+        assert_eq!(bookmark.notes, None);
+        assert_eq!(bookmark.color, Some("#F56C6C".to_string())); // Red
         assert!(bookmark.created_at.is_some());
     }
 }
