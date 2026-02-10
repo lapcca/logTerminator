@@ -57,31 +57,81 @@ function extractJsonByBrackets(text, startChar, endChar) {
 
 /**
  * Extract all potential JSON candidates from text
- * Prioritizes arrays containing objects (e.g., [{...}]), then objects, then bare arrays
+ * Extracts ALL complete structures (both {} and []) and returns them in order of appearance
  * @param {string} text - The text to search
  * @returns {Array<string>} Array of potential JSON strings
  */
 function extractJsonCandidates(text) {
   const candidates = []
+  const extracted = new Set() // Track extracted positions to avoid duplicates
 
-  const arrayCandidate = extractCompleteStructure(text, '[', ']')
-  const objectCandidate = extractCompleteStructure(text, '{', '}')
+  // Extract all complete structures from the text
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i]
 
-  // If array starts with '[{' (array of objects), prioritize it over objects
-  if (arrayCandidate && arrayCandidate.trim().startsWith('[{')) {
-    candidates.push(arrayCandidate)
-  }
+    // Check for both object and array start characters
+    if (char === '{' || char === '[') {
+      const startChar = char
+      const endChar = char === '{' ? '}' : ']'
 
-  // Then add objects
-  if (objectCandidate) {
-    candidates.push(objectCandidate)
-  }
+      // Skip if this position is already part of an extracted structure
+      let isDuplicate = false
+      for (const extractedPos of extracted) {
+        if (i >= extractedPos.start && i <= extractedPos.end) {
+          isDuplicate = true
+          break
+        }
+      }
+      if (isDuplicate) continue
 
-  // Finally add arrays (if not already added and different from object)
-  if (arrayCandidate && arrayCandidate !== objectCandidate) {
-    // Only add if it's a pure array (not starting with [{ which we already added)
-    if (!arrayCandidate.trim().startsWith('[{')) {
-      candidates.push(arrayCandidate)
+      // Try to extract a complete structure starting at this position
+      let depth = 0
+      let inString = false
+      let escapeNext = false
+      let start = i
+      let end = -1
+
+      for (let j = i; j < text.length; j++) {
+        const char = text[j]
+
+        // Handle escape sequences inside strings
+        if (escapeNext) {
+          escapeNext = false
+          continue
+        }
+
+        // Track escape characters
+        if (char === '\\' && inString) {
+          escapeNext = true
+          continue
+        }
+
+        // Track string boundaries
+        if (char === '"') {
+          inString = !inString
+          continue
+        }
+
+        // Only count brackets when not inside a string
+        if (!inString) {
+          if (char === startChar) {
+            depth++
+          } else if (char === endChar) {
+            depth--
+            if (depth === 0) {
+              end = j
+              break
+            }
+          }
+        }
+      }
+
+      // If we found a complete structure, add it to candidates
+      if (end !== -1) {
+        const candidate = text.substring(start, end + 1)
+        candidates.push(candidate)
+        extracted.add({ start, end })
+      }
     }
   }
 

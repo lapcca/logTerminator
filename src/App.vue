@@ -778,6 +778,21 @@ function closeBookmarkColorPicker() {
   bookmarkColorPickerEntryId.value = null
 }
 
+// Handle click outside to close bookmark color picker
+function handleBookmarkPickerClickOutside(event) {
+  // Only handle if the picker is visible
+  if (!bookmarkColorPickerVisible.value) return
+
+  // Find the popover element
+  const popover = document.querySelector('.el-popover.bookmark-color-picker-popover')
+  const reference = event.target.closest('.el-popover__reference')
+
+  // Close if click is outside both popover and reference button
+  if (popover && !popover.contains(event.target) && !reference) {
+    closeBookmarkColorPicker()
+  }
+}
+
 // Remove bookmark by ID
 async function removeBookmarkById(bookmarkId) {
   try {
@@ -1342,6 +1357,9 @@ onMounted(async () => {
   document.addEventListener('mousemove', onMouseMove)
   document.addEventListener('mouseup', onMouseUp)
   window.addEventListener('resize', handleWindowResize)
+
+  // Add click outside listener for bookmark color picker
+  document.addEventListener('click', handleBookmarkPickerClickOutside)
 })
 
 onUnmounted(() => {
@@ -1351,6 +1369,8 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleWindowResize)
   // Remove dropdown close listeners
   removeDropdownCloseListeners()
+  // Remove click outside listener for bookmark color picker
+  document.removeEventListener('click', handleBookmarkPickerClickOutside)
 })
 
 // Handle window resize - clamp pinned tooltip to new bounds
@@ -1961,7 +1981,8 @@ function updatePinnedSize(size) {
                       :visible="bookmarkColorPickerVisible && bookmarkColorPickerEntryId === row.id"
                       placement="left"
                       width="200"
-                      trigger="manual">
+                      trigger="manual"
+                      popper-class="bookmark-color-picker-popover">
                       <template #reference>
                         <el-button
                           :icon="Star"
