@@ -253,7 +253,6 @@ const showSourceDialog = ref(false)
 const logSourceInput = ref('') // Combined input for both URL and folder path
 const logSourceInputRef = ref(null) // Ref for the input element
 const logSourceHistory = ref([]) // History entries for dropdown
-const historyLoaded = ref(false)  // Track if history has been loaded
 
 // Detect input type based on content
 const inputSourceType = computed(() => {
@@ -651,14 +650,13 @@ async function loadLogSourceHistory() {
   try {
     const history = await invoke('get_log_history')
     logSourceHistory.value = history
-    historyLoaded.value = true
   } catch (error) {
     console.error('Error loading log history:', error)
     logSourceHistory.value = []
   }
 }
 
-// Truncate path for display (show last ~30 chars with ...)
+// Truncate path to ~40 chars total for display (shows "..." + last 37 chars)
 function truncatePath(path) {
   if (path.length <= 40) return path
   return '...' + path.slice(-37)
@@ -1632,7 +1630,7 @@ function updatePinnedSize(size) {
             @keyup.enter="handleSourceDialogEnter">
             <el-option
               v-for="(item, index) in logSourceHistory"
-              :key="index"
+              :key="item"
               :label="item"
               :value="item">
               <div class="history-option">
