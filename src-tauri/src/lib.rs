@@ -1,5 +1,6 @@
 pub mod bookmark_utils;
 mod database;
+mod history;
 pub mod http_log_fetcher;
 pub mod http_async;
 pub mod log_parser;
@@ -561,6 +562,18 @@ fn get_last_directory() -> Result<String, String> {
     }
 }
 
+/// Get log source history
+#[tauri::command]
+fn get_log_history() -> Vec<String> {
+    history::get_recent_history(10)
+}
+
+/// Save a log source history entry
+#[tauri::command]
+fn save_log_history_entry(entry: String) -> Result<(), String> {
+    history::save_history(entry)
+}
+
 /// Initialize logging to both file and console
 fn init_logging() -> std::io::Result<()> {
     use std::fs::OpenOptions;
@@ -647,7 +660,9 @@ pub fn run() {
             ensure_auto_bookmarks,
             delete_session,
             save_last_directory,
-            get_last_directory
+            get_last_directory,
+            get_log_history,
+            save_log_history_entry
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
