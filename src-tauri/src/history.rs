@@ -3,20 +3,23 @@ use std::path::PathBuf;
 use std::env;
 
 /// Get the history file path
-fn get_history_file() -> PathBuf {
+fn get_history_file() -> Result<PathBuf, String> {
     // Get the directory containing the executable (same as storage pattern in lib.rs)
     let exe_path = env::current_exe()
-        .expect("Failed to get executable path");
+        .map_err(|e| format!("Failed to get exe path: {}", e))?;
     let exe_dir = exe_path
         .parent()
-        .expect("Cannot determine executable directory");
-
-    exe_dir.join("log_history.txt")
+        .ok_or_else(|| "Cannot determine executable directory".to_string())?;
+    Ok(exe_dir.join("log_history.txt"))
 }
 
 /// Load history from file, returns Vec<String>
 pub fn load_history() -> Vec<String> {
-    let history_file = get_history_file();
+    let history_file = match get_history_file() {
+        Ok(path) => path,
+        Err(_) => return Vec::new(),
+    };
+
     if !history_file.exists() {
         return Vec::new();
     }
@@ -47,7 +50,7 @@ pub fn save_history(entry: String) -> Result<(), String> {
 
     // Save with | separator
     let content = history.join("|");
-    let history_file = get_history_file();
+    let history_file = get_history_file()?;
 
     fs::write(&history_file, content)
         .map_err(|e| format!("Failed to write history: {}", e))
@@ -61,9 +64,6 @@ pub fn get_recent_history(count: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::fs;
-
     #[test]
     fn test_load_history_empty() {
         // This test verifies that load_history returns empty vec when file doesn't exist
