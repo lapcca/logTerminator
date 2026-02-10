@@ -1801,7 +1801,7 @@ function updatePinnedSize(size) {
             placeholder="搜索日志内容..."
             :prefix-icon="Search"
             clearable
-            style="width: 240px"
+            style="width: 360px"
             @input="debouncedSearch">
           </el-input>
 
@@ -1811,6 +1811,7 @@ function updatePinnedSize(size) {
             v-model="levelFilter"
             placeholder="日志级别"
             multiple
+            collapse-tags
             class="level-filter-select"
             :popper-options="{
               strategy: 'fixed',
@@ -2185,17 +2186,18 @@ function updatePinnedSize(size) {
   flex-shrink: 0;
 }
 
-/* Log level filter - dynamic width to align with table */
+/* Log level filter - simplified with reduced width */
 .level-filter-select {
-  flex: 0 0 auto !important;
-  width: calc(100vw - 1030px) !important;
-  min-width: 200px !important;
-  max-width: none !important;
+  flex: 0 1 auto !important;
+  width: auto !important;
+  min-width: 120px !important;
+  max-width: 300px !important;
 }
 
-/* When sidebar is collapsed, log level filter can be wider */
+/* When sidebar is collapsed, log level filter maintains consistent width */
 .sidebar-collapsed .level-filter-select {
-  width: calc(100vw - 430px) !important;
+  width: auto !important;
+  max-width: 300px !important;
 }
 
 .header-right {
