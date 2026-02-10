@@ -252,6 +252,8 @@ const resizeStartWidth = ref(0) // Sidebar width when drag starts
 const showSourceDialog = ref(false)
 const logSourceInput = ref('') // Combined input for both URL and folder path
 const logSourceInputRef = ref(null) // Ref for the input element
+const logSourceHistory = ref([]) // History entries for dropdown
+const historyLoaded = ref(false)  // Track if history has been loaded
 
 // Detect input type based on content
 const inputSourceType = computed(() => {
@@ -499,6 +501,15 @@ async function scanTests(path, isHttp) {
       return
     }
 
+    // Save to history
+    try {
+      await invoke('save_log_history_entry', { entry: path })
+      // Refresh history
+      await loadLogSourceHistory()
+    } catch (error) {
+      console.error('Error saving to history:', error)
+    }
+
     // Show test selection dialog
     showTestSelectionDialog.value = true
   } catch (error) {
@@ -633,6 +644,24 @@ async function loadSessions() {
   } catch (error) {
     console.error('Error loading sessions:', error)
   }
+}
+
+// Load log source history
+async function loadLogSourceHistory() {
+  try {
+    const history = await invoke('get_log_history')
+    logSourceHistory.value = history
+    historyLoaded.value = true
+  } catch (error) {
+    console.error('Error loading log history:', error)
+    logSourceHistory.value = []
+  }
+}
+
+// Truncate path for display (show last ~30 chars with ...)
+function truncatePath(path) {
+  if (path.length <= 40) return path
+  return '...' + path.slice(-37)
 }
 
 // Confirm delete session
@@ -1421,7 +1450,9 @@ watch(sidebarWidth, (newWidth) => {
 })
 
 // Handle dialog opened event - focus input when dialog is fully opened
-function handleSourceDialogOpened() {
+async function handleSourceDialogOpened() {
+  // Load history when dialog opens
+  await loadLogSourceHistory()
   nextTick(() => {
     if (logSourceInputRef.value) {
       logSourceInputRef.value.focus()
@@ -1586,15 +1617,30 @@ function updatePinnedSize(size) {
           <span v-else>输入文件夹路径或 HTTP URL</span>
         </div>
         <div class="source-input-wrapper">
-          <el-input
+          <el-select
             ref="logSourceInputRef"
             v-model="logSourceInput"
+            filterable
+            allow-create
+            default-first-option
             :placeholder="inputSourceType === 'url' ? '例如: http://logs.example.com/test-logs/' : '选择或输入本地文件夹路径，或输入 HTTP URL'"
             :prefix-icon="inputSourceType === 'url' ? Link : Folder"
             clearable
             size="large"
             class="log-source-input"
-            @keyup.enter="handleSourceDialogEnter" />
+            popper-class="log-source-history-dropdown"
+            @keyup.enter="handleSourceDialogEnter">
+            <el-option
+              v-for="(item, index) in logSourceHistory"
+              :key="index"
+              :label="item"
+              :value="item">
+              <div class="history-option">
+                <el-icon><component :is="inputSourceType === 'url' ? Link : Folder" /></el-icon>
+                <span class="history-text-truncated">{{ truncatePath(item) }}</span>
+              </div>
+            </el-option>
+          </el-select>
           <el-button
             v-if="inputSourceType === 'folder'"
             @click="selectLocalFolder"
@@ -2776,5 +2822,18 @@ function updatePinnedSize(size) {
 .message-tooltip-popover.is-pinned {
   position: fixed !important;
   transform: none !important;
+}
+
+/* Log Source History Dropdown Styles */
+.log-source-history-dropdown .history-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-source-history-dropdown .history-text-truncated {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
