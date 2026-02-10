@@ -289,6 +289,37 @@ const testScanLoading = ref(false)
 const pendingSourcePath = ref('')
 const pendingSourceIsHttp = ref(false)
 
+// Cache for session path colors
+const pathColorCache = new Map()
+
+// Simple string hash for color generation
+function stringHash(str) {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i)
+    hash = ((hash << 5) - hash) + char
+    hash = hash & hash
+  }
+  return Math.abs(hash)
+}
+
+// Generate pastel color from hash (HSL: high lightness for readability)
+function generatePathColor(path) {
+  if (!path) return 'hsl(0, 0%, 95%)' // Fallback for null/undefined
+  const hash = stringHash(path)
+  const hue = hash % 360
+  return `hsl(${hue}, 70%, 90%)`
+}
+
+// Get cached color for a path
+function getPathColor(path) {
+  if (!path) return 'hsl(0, 0%, 95%)' // Fallback
+  if (!pathColorCache.has(path)) {
+    pathColorCache.set(path, generatePathColor(path))
+  }
+  return pathColorCache.get(path)
+}
+
 // Toggle functions
 function toggleBookmarksPanel() {
   showBookmarksPanel.value = !showBookmarksPanel.value
@@ -1736,7 +1767,9 @@ function updatePinnedSize(size) {
                 placement="right"
                 :show-after="300">
                 <div class="session-option-item">
-                  <div class="session-info">
+                  <div
+                    class="session-info"
+                    :style="{ backgroundColor: getPathColor(session.directory_path) }">
                     <el-icon><component :is="session.source_type === 'http' ? 'Link' : 'Folder'" /></el-icon>
                     <span class="session-name">{{ session.name }}</span>
                     <span class="session-count">{{ session.total_entries }} 条记录</span>
