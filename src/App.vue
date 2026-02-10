@@ -1766,10 +1766,10 @@ function updatePinnedSize(size) {
                 :content="session.directory_path"
                 placement="right"
                 :show-after="300">
-                <div class="session-option-item">
-                  <div
-                    class="session-info"
-                    :style="{ backgroundColor: getPathColor(session.directory_path) }">
+                <div
+                  class="session-option-item"
+                  :style="{ backgroundColor: getPathColor(session.directory_path) }">
+                  <div class="session-info">
                     <el-icon><component :is="session.source_type === 'http' ? 'Link' : 'Folder'" /></el-icon>
                     <span class="session-name">{{ session.name }}</span>
                     <span class="session-count">{{ session.total_entries }} 条记录</span>
