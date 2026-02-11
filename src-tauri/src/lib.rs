@@ -116,6 +116,20 @@ async fn search_entries(
     Ok(results)
 }
 
+#[tauri::command]
+fn find_entry_page(
+    session_id: String,
+    entry_id: i64,
+    items_per_page: usize,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let db_manager = state.db_manager.lock()
+        .map_err(|e| e.to_string())?;
+
+    db_manager.find_entry_page_simple(&session_id, entry_id, items_per_page)
+        .map_err(|e| format!("Failed to find entry page: {}", e))
+}
+
 // Scan directory for test sessions without loading them
 #[tauri::command]
 fn scan_log_directory(
@@ -757,7 +771,8 @@ pub fn run() {
             get_last_directory,
             get_log_history,
             save_log_history_entry,
-            search_entries
+            search_entries,
+            find_entry_page
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

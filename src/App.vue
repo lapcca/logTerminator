@@ -34,6 +34,7 @@ import {
 import MessageTooltip from './components/MessageTooltip.vue'
 import TestSelectionDialog from './components/TestSelectionDialog.vue'
 import BookmarkColorPicker from './components/BookmarkColorPicker.vue'
+import SearchPanel from './components/SearchPanel.vue'
 import { parsePythonStackTrace, getStackPreview, isPythonStackTrace } from './utils/stackParser.js'
 import { formatMessage } from './utils/messageFormatter.js'
 
@@ -1119,6 +1120,30 @@ function executeJump() {
   jumpToPage.value = targetPage
 }
 
+// Handle search result jump
+function handleSearchResultJump(entryId) {
+  // Find the page where this entry is located
+  invoke('find_entry_page', {
+    sessionId: currentSession.value,
+    entryId: entryId,
+    itemsPerPage: options.itemsPerPage
+  }).then(page => {
+    if (page && page >= 1) {
+      goToPage(page)
+      // Highlight the entry after page loads
+      nextTick(() => {
+        highlightedEntryId.value = entryId
+        const entryEl = document.querySelector(`.entry-id-${entryId}`)
+        if (entryEl) {
+          entryEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
+      })
+    }
+  }).catch(error => {
+    ElMessage.error('跳转失败: ' + error)
+  })
+}
+
 // Calculate visible page numbers for pagination
 function visiblePageNumbers(currentPage, totalPages) {
   const pages = []
@@ -1854,15 +1879,10 @@ function updatePinnedSize(size) {
             打开目录
           </el-button>
 
-          <!-- Search Input -->
-          <el-input
-            v-model="searchTerm"
-            placeholder="搜索日志内容..."
-            :prefix-icon="Search"
-            clearable
-            style="width: 360px"
-            @input="debouncedSearch">
-          </el-input>
+          <!-- Search Panel -->
+          <SearchPanel
+            :session-id="currentSession"
+            @jump-to-entry="handleSearchResultJump" />
 
           <!-- Log Level Filter -->
           <el-select
