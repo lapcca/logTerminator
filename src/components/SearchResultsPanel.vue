@@ -14,10 +14,19 @@ const props = defineProps({
   isRegexMode: {
     type: Boolean,
     default: false
+  },
+  // Callback functions for parent to call
+  onToggleSearchGroup: {
+    type: Function,
+    default: null
+  },
+  onClearSearchHistory: {
+    type: Function,
+    default: null
   }
 })
 
-const emit = defineEmits(['jump-to-entry', 'clear-history', 'toggle-search-group'])
+const emit = defineEmits(['jump-to-entry'])
 
 const showSearchResults = ref(true)
 
@@ -30,16 +39,25 @@ function toggleSearchGroup(id) {
 }
 
 function clearSearchHistory() {
-  emit('clear-history')
+  // Call parent's clear handler
+  if (props.onClearSearchHistory) {
+    props.onClearSearchHistory()
+  }
 }
 
 function displaySearchTerm(search) {
-  if (search.request.type === 'simple') {
-    return search.request.term
-  } else {
-    return search.request.conditions.map(c => c.term).join(' ') +
-           search.request.conditions.map(c => c.operator).join(' ') + ' '
+  if (!search) return ''
+
+  const request = search.request
+  const searchType = request.type
+
+  if (searchType === 'simple') {
+    return request.term
+  } else if (searchType === 'advanced') {
+    // Only show terms, not operators
+    return request.conditions.map(c => c.term).join(' ')
   }
+  return ''
 }
 
 function formatTime(timestamp) {
@@ -50,9 +68,12 @@ function formatTime(timestamp) {
 function highlightMatch(message, searchRequest) {
   let patterns = []
 
-  if (searchRequest.type === 'simple') {
+  const searchType = searchRequest.type
+
+  if (searchType === 'simple') {
     patterns = [searchRequest.term]
-  } else {
+  } else if (searchType === 'advanced') {
+    // Only get terms, not operators
     patterns = searchRequest.conditions.map(c => c.term)
   }
 
@@ -78,6 +99,11 @@ function highlightMatch(message, searchRequest) {
 
 function jumpToEntry(entryId) {
   emit('jump-to-entry', entryId)
+}
+
+function handleDeleteSearchResult(searchId, resultIndex) {
+  // Emit delete event to parent
+  emit('delete-search-result', { searchId, resultIndex })
 }
 </script>
 

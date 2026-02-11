@@ -1419,6 +1419,35 @@ function handleToggleSearchGroup(id) {
   }
 }
 
+// Handle delete search result from SearchResultsPanel
+function handleDeleteSearchResult(searchId, resultIndex) {
+  if (!searchPanelRef.value) return
+
+  // Get the search result at the specified index
+  const search = searchResults.history[resultIndex]
+  if (!search) return
+
+  // Remove the match at the specified index
+  if (search.matches && search.matches.length > resultIndex) {
+    search.matches.splice(resultIndex, 1)
+  }
+
+  // If no more matches left, remove the entire search result
+  if (search.matches && search.matches.length === 0) {
+    searchResults.history.splice(resultIndex, 1)
+  }
+
+  // Update total count
+  searchResults.totalMatchCount = searchResults.history.reduce(
+    (sum, s) => sum + (s.matches?.length || 0), 0
+  )
+
+  // If no more results, hide the panel
+  if (searchResults.history.length === 0) {
+    searchResults.hasResults = false
+  }
+}
+
 // Handle JSON detected in message
 function handleJsonDetected(entryId, data) {
   console.log('JSON detected in entry', entryId, ':', data)
@@ -2234,7 +2263,8 @@ function updatePinnedSize(size) {
               :is-regex-mode="searchPanelRef?.searchState?.isRegexMode || false"
               @jump-to-entry="jumpToEntry"
               @clear-history="handleClearSearchHistory"
-              @toggle-search-group="handleToggleSearchGroup" />
+              @toggle-search-group="handleToggleSearchGroup"
+              @delete-search-result="handleDeleteSearchResult" />
           </div>
         </div>
       </div>
