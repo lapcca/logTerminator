@@ -35,6 +35,7 @@ import MessageTooltip from './components/MessageTooltip.vue'
 import TestSelectionDialog from './components/TestSelectionDialog.vue'
 import BookmarkColorPicker from './components/BookmarkColorPicker.vue'
 import SearchPanel from './components/SearchPanel.vue'
+import SearchResultsPanel from './components/SearchResultsPanel.vue'
 import { parsePythonStackTrace, getStackPreview, isPythonStackTrace } from './utils/stackParser.js'
 import { formatMessage } from './utils/messageFormatter.js'
 
@@ -195,6 +196,14 @@ const selectedEntryIds = ref([]) // 选中的日志条目ID
 const highlightedEntryId = ref(null) // 当前高亮的条目ID
 const jumpToPage = ref(1) // 跳转到页码输入框的值
 const levelSelectRef = ref(null) // Ref for level filter select dropdown
+const searchPanelRef = ref(null) // Ref for SearchPanel component
+
+// Search results state
+const searchResults = reactive({
+  history: [],
+  totalMatchCount: 0,
+  hasResults: false
+})
 
 // Message expand/collapse state
 const expandedMessageIds = ref(new Set()) // Set of message IDs that are expanded
@@ -1120,30 +1129,6 @@ function executeJump() {
   jumpToPage.value = targetPage
 }
 
-// Handle search result jump
-function handleSearchResultJump(entryId) {
-  // Find the page where this entry is located
-  invoke('find_entry_page', {
-    sessionId: currentSession.value,
-    entryId: entryId,
-    itemsPerPage: options.itemsPerPage
-  }).then(page => {
-    if (page && page >= 1) {
-      goToPage(page)
-      // Highlight the entry after page loads
-      nextTick(() => {
-        highlightedEntryId.value = entryId
-        const entryEl = document.querySelector(`.entry-id-${entryId}`)
-        if (entryEl) {
-          entryEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        }
-      })
-    }
-  }).catch(error => {
-    ElMessage.error('跳转失败: ' + error)
-  })
-}
-
 // Calculate visible page numbers for pagination
 function visiblePageNumbers(currentPage, totalPages) {
   const pages = []
@@ -1370,6 +1355,67 @@ async function jumpToBookmark(bookmark) {
   } catch (error) {
     console.error('Error jumping to bookmark:', error)
     alert('跳转到书签时出错')
+  }
+}
+
+// Handle search results updated from SearchPanel
+function handleSearchResultsUpdated(data) {
+  searchResults.history = data.history
+  searchResults.totalMatchCount = data.totalMatchCount
+  searchResults.hasResults = data.hasResults
+}
+
+// Jump to entry from search results
+async function jumpToEntry(entryId) {
+  if (!entryId) return
+
+  try {
+    // Get the page number for this entry
+    const entryPage = await invoke('get_entry_page', {
+      entryId: entryId,
+      itemsPerPage: options.itemsPerPage,
+      levelFilter: levelFilter.value,
+      searchTerm: searchTerm.value
+    })
+
+    if (entryPage === null) {
+      alert('搜索结果对应的日志条目不存在')
+      return
+    }
+
+    // Navigate to the correct page
+    if (entryPage !== options.page) {
+      options.page = entryPage
+      currentPageForScroll.value = entryPage
+      await refreshLogs()
+      // Wait for render then highlight
+      await nextTick()
+      setTimeout(() => highlightAndScroll(entryId), 150)
+    } else {
+      // Already on correct page, just highlight
+      highlightAndScroll(entryId)
+    }
+  } catch (error) {
+    console.error('Error jumping to entry:', error)
+    alert('跳转到日志条目时出错')
+  }
+}
+
+// Handle clear search history from SearchResultsPanel
+function handleClearSearchHistory() {
+  if (searchPanelRef.value) {
+    searchPanelRef.value.clearSearchHistory()
+  }
+  // Reset local state
+  searchResults.history = []
+  searchResults.totalMatchCount = 0
+  searchResults.hasResults = false
+}
+
+// Handle toggle search group from SearchResultsPanel
+function handleToggleSearchGroup(id) {
+  if (searchPanelRef.value) {
+    searchPanelRef.value.toggleSearchGroup(id)
   }
 }
 
@@ -1881,8 +1927,10 @@ function updatePinnedSize(size) {
 
           <!-- Search Panel -->
           <SearchPanel
+            ref="searchPanelRef"
             :session-id="currentSession"
-            @jump-to-entry="handleSearchResultJump" />
+            @search-results-updated="handleSearchResultsUpdated"
+            @jump-to-entry="jumpToEntry" />
 
           <!-- Log Level Filter -->
           <el-select
@@ -2177,6 +2225,16 @@ function updatePinnedSize(size) {
                   @size-change="handleSizeChange" />
               </div>
             </el-card>
+
+            <!-- Search Results Panel -->
+            <SearchResultsPanel
+              v-if="searchResults.hasResults"
+              :search-history="searchResults.history"
+              :total-match-count="searchResults.totalMatchCount"
+              :is-regex-mode="searchPanelRef?.searchState?.isRegexMode || false"
+              @jump-to-entry="jumpToEntry"
+              @clear-history="handleClearSearchHistory"
+              @toggle-search-group="handleToggleSearchGroup" />
           </div>
         </div>
       </div>

@@ -4,10 +4,10 @@ import { ElMessage } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import {
   Search, Operation, Grid, Memo, List,
-  Plus, Delete, ArrowDown, ArrowUp, ArrowRight, ArrowLeft
+  Plus, Delete
 } from '@element-plus/icons-vue'
 
-const emit = defineEmits(['jump-to-entry'])
+const emit = defineEmits(['search-results-updated'])
 
 // Define props for session ID
 const props = defineProps({
@@ -29,7 +29,6 @@ const searchState = reactive({
   expandedSearchId: null
 })
 
-const showSearchResults = ref(false)
 const loading = ref(false)
 
 // Generate unique ID
@@ -41,6 +40,17 @@ function generateId() {
 const totalMatchCount = computed(() =>
   searchState.history.reduce((sum, s) => sum + s.matches.length, 0)
 )
+
+// Expose search state and history for parent component access
+defineExpose({
+  searchState,
+  totalMatchCount,
+  toggleSearchGroup,
+  clearSearchHistory,
+  displaySearchTerm,
+  formatTime,
+  highlightMatch
+})
 
 // Toggle functions
 function toggleRegexMode() {
@@ -130,14 +140,16 @@ function addSearchResult(request) {
 
   searchState.history.unshift(searchRecord)
   searchState.expandedSearchId = searchRecord.id
-  showSearchResults.value = true
+
+  // Emit event to notify parent component
+  emit('search-results-updated', {
+    history: searchState.history,
+    totalMatchCount: totalMatchCount.value,
+    hasResults: searchState.history.length > 0
+  })
 }
 
-// Search Results Panel functions
-function toggleSearchResults() {
-  showSearchResults.value = !showSearchResults.value
-}
-
+// Search Results Panel functions (exposed for SearchResultsPanel)
 function toggleSearchGroup(id) {
   const search = searchState.history.find(s => s.id === id)
   if (search) {
@@ -147,7 +159,11 @@ function toggleSearchGroup(id) {
 
 function clearSearchHistory() {
   searchState.history = []
-  showSearchResults.value = false
+  emit('search-results-updated', {
+    history: [],
+    totalMatchCount: 0,
+    hasResults: false
+  })
 }
 
 function displaySearchTerm(search) {
@@ -191,10 +207,6 @@ function highlightMatch(message, searchRequest) {
   })
 
   return highlighted
-}
-
-function jumpToEntry(entryId) {
-  emit('jump-to-entry', entryId)
 }
 </script>
 
@@ -285,55 +297,6 @@ function jumpToEntry(entryId) {
         </el-card>
       </div>
     </el-collapse-transition>
-
-    <!-- Search Results Panel -->
-    <div class="search-results-container">
-      <div class="search-results-header" @click="toggleSearchResults">
-        <el-icon :class="{ 'is-collapsed': !showSearchResults }">
-          <ArrowDown v-if="showSearchResults" />
-          <ArrowUp v-else />
-        </el-icon>
-        <span class="results-title">搜索结果</span>
-        <span class="results-count">({{ totalMatchCount }})</span>
-        <el-button
-          :icon="Delete"
-          text
-          size="small"
-          @click.stop="clearSearchHistory">
-          清除
-        </el-button>
-      </div>
-
-      <el-collapse-transition>
-        <div v-show="showSearchResults" class="search-results-content">
-          <div v-for="search in searchState.history"
-               :key="search.id"
-               class="search-result-group">
-            <div class="search-result-header" @click="toggleSearchGroup(search.id)">
-              <el-icon>
-                <ArrowRight v-if="!search.expanded" />
-                <ArrowDown v-else />
-              </el-icon>
-              <span class="search-term">{{ displaySearchTerm(search) }}</span>
-              <el-tag size="small" type="info">{{ search.matches.length }} 条</el-tag>
-              <span class="search-time">{{ formatTime(search.timestamp) }}</span>
-            </div>
-
-            <el-collapse-transition>
-              <div v-show="search.expanded" class="search-matches-list">
-                <div v-for="match in search.matches"
-                     :key="match.id"
-                     class="search-match-item"
-                     @click="jumpToEntry(match.id)">
-                  <span class="match-line">{{ match.lineNumber }}</span>
-                  <span class="match-message" v-html="highlightMatch(match.message, search.request)"></span>
-                </div>
-              </div>
-            </el-collapse-transition>
-          </div>
-        </div>
-      </el-collapse-transition>
-    </div>
   </div>
 </template>
 
@@ -381,102 +344,5 @@ function jumpToEntry(entryId) {
 
 .add-condition-btn {
   margin-right: 12px;
-}
-
-.search-results-container {
-  border-top: 1px solid var(--el-border-color);
-  background: var(--el-bg-color);
-}
-
-.search-results-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  cursor: pointer;
-  background: var(--el-fill-color-light);
-  user-select: none;
-}
-
-.search-results-header:hover {
-  background: var(--el-fill-color);
-}
-
-.results-title {
-  font-weight: 600;
-}
-
-.results-count {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
-
-.search-results-content {
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.search-result-group {
-  border-bottom: 1px solid var(--el-border-color-lighter);
-}
-
-.search-result-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
-  cursor: pointer;
-}
-
-.search-result-header:hover {
-  background: var(--el-fill-color-lighter);
-}
-
-.search-term {
-  flex: 1;
-  font-size: 13px;
-}
-
-.search-time {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-}
-
-.search-matches-list {
-  padding: 0 16px 12px;
-}
-
-.search-match-item {
-  display: flex;
-  gap: 12px;
-  padding: 6px 8px;
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-.search-match-item:hover {
-  background: var(--el-fill-color-light);
-}
-
-.match-line {
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  min-width: 40px;
-  text-align: right;
-}
-
-.match-message {
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.match-message :deep(.highlight) {
-  background: var(--el-color-warning);
-  color: var(--el-color-danger);
-  font-weight: bold;
-  padding: 0 2px;
-  border-radius: 2px;
 }
 </style>
