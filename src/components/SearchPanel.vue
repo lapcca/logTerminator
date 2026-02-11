@@ -1,12 +1,21 @@
 <script setup>
 import { ref, reactive, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { invoke } from '@tauri-apps/api/core'
 import {
   Search, Operation, Grid, Memo, List,
   Plus, Delete, ArrowDown, ArrowUp, ArrowRight, ArrowLeft
 } from '@element-plus/icons-vue'
 
 const emit = defineEmits(['jump-to-entry'])
+
+// Define props for session ID
+const props = defineProps({
+  sessionId: {
+    type: String,
+    required: true
+  }
+})
 
 // Search state
 const searchState = reactive({
@@ -23,6 +32,11 @@ const searchState = reactive({
 const showSearchResults = ref(false)
 const loading = ref(false)
 
+// Generate unique ID
+function generateId() {
+  return Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+}
+
 // Computed
 const totalMatchCount = computed(() =>
   searchState.history.reduce((sum, s) => sum + s.matches.length, 0)
@@ -37,9 +51,29 @@ function toggleAdvancedMode() {
   searchState.isAdvancedMode = !searchState.isAdvancedMode
 }
 
-// Placeholder for executeSimpleSearch (will implement in later task)
-function executeSimpleSearch() {
-  // TODO: Implement in backend integration task
+// Execute simple search
+async function executeSimpleSearch() {
+  if (!searchState.simpleTerm.trim()) return
+
+  loading.value = true
+  try {
+    const result = await invoke('search_entries', {
+      searchType: 'simple',
+      searchTerm: searchState.simpleTerm,
+      isRegex: searchState.isRegexMode,
+      sessionId: props.sessionId
+    })
+
+    addSearchResult({
+      type: 'simple',
+      term: searchState.simpleTerm,
+      matches: result
+    })
+  } catch (error) {
+    ElMessage.error('搜索失败: ' + error)
+  } finally {
+    loading.value = false
+  }
 }
 
 // Condition management functions
@@ -55,19 +89,53 @@ function removeCondition(index) {
   searchState.conditions.splice(index, 1)
 }
 
-function executeAdvancedSearch() {
+// Execute advanced search
+async function executeAdvancedSearch() {
   const validConditions = searchState.conditions.filter(c => c.term.trim())
   if (validConditions.length === 0) {
     ElMessage.warning('请输入至少一个搜索条件')
     return
   }
-  // Will be implemented in backend integration task
-  console.log('Advanced search:', validConditions)
+
+  loading.value = true
+  try {
+    const result = await invoke('search_entries', {
+      searchType: 'advanced',
+      conditions: validConditions,
+      isRegex: searchState.isRegexMode,
+      sessionId: props.sessionId
+    })
+
+    addSearchResult({
+      type: 'advanced',
+      conditions: validConditions,
+      matches: result
+    })
+  } catch (error) {
+    ElMessage.error('搜索失败: ' + error)
+  } finally {
+    loading.value = false
+  }
+}
+
+// Add search result to history
+function addSearchResult(request) {
+  const searchRecord = {
+    id: generateId(),
+    timestamp: Date.now(),
+    request: request,
+    matches: request.matches,  // { id, timestamp, lineNumber, message }
+    expanded: true
+  }
+
+  searchState.history.unshift(searchRecord)
+  searchState.expandedSearchId = searchRecord.id
+  showSearchResults.value = true
 }
 </script>
 
 <template>
-  <div class="search-panel">
+  <div class="search-panel" v-loading="loading">
     <!-- Search Input -->
     <el-input
       v-model="searchState.simpleTerm"
