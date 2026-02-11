@@ -132,6 +132,41 @@ function addSearchResult(request) {
   searchState.expandedSearchId = searchRecord.id
   showSearchResults.value = true
 }
+
+// Search Results Panel functions
+function toggleSearchResults() {
+  showSearchResults.value = !showSearchResults.value
+}
+
+function toggleSearchGroup(id) {
+  const search = searchState.history.find(s => s.id === id)
+  if (search) {
+    search.expanded = !search.expanded
+  }
+}
+
+function clearSearchHistory() {
+  searchState.history = []
+  showSearchResults.value = false
+}
+
+function displaySearchTerm(search) {
+  if (search.request.type === 'simple') {
+    return search.request.term
+  } else {
+    return search.request.conditions.map(c => c.term).join(' ') +
+           search.request.conditions.map(c => c.operator).join(' ') + ' '
+  }
+}
+
+function formatTime(timestamp) {
+  const date = new Date(timestamp)
+  return date.toLocaleTimeString()
+}
+
+function jumpToEntry(entryId) {
+  emit('jump-to-entry', entryId)
+}
 </script>
 
 <template>
@@ -221,6 +256,55 @@ function addSearchResult(request) {
         </el-card>
       </div>
     </el-collapse-transition>
+
+    <!-- Search Results Panel -->
+    <div class="search-results-container">
+      <div class="search-results-header" @click="toggleSearchResults">
+        <el-icon :class="{ 'is-collapsed': !showSearchResults }">
+          <ArrowDown v-if="showSearchResults" />
+          <ArrowUp v-else />
+        </el-icon>
+        <span class="results-title">搜索结果</span>
+        <span class="results-count">({{ totalMatchCount }})</span>
+        <el-button
+          :icon="Delete"
+          text
+          size="small"
+          @click.stop="clearSearchHistory">
+          清除
+        </el-button>
+      </div>
+
+      <el-collapse-transition>
+        <div v-show="showSearchResults" class="search-results-content">
+          <div v-for="search in searchState.history"
+               :key="search.id"
+               class="search-result-group">
+            <div class="search-result-header" @click="toggleSearchGroup(search.id)">
+              <el-icon>
+                <ArrowRight v-if="!search.expanded" />
+                <ArrowDown v-else />
+              </el-icon>
+              <span class="search-term">{{ displaySearchTerm(search) }}</span>
+              <el-tag size="small" type="info">{{ search.matches.length }} 条</el-tag>
+              <span class="search-time">{{ formatTime(search.timestamp) }}</span>
+            </div>
+
+            <el-collapse-transition>
+              <div v-show="search.expanded" class="search-matches-list">
+                <div v-for="match in search.matches"
+                     :key="match.id"
+                     class="search-match-item"
+                     @click="jumpToEntry(match.id)">
+                  <span class="match-line">{{ match.lineNumber }}</span>
+                  <span class="match-message">{{ match.message }}</span>
+                </div>
+              </div>
+            </el-collapse-transition>
+          </div>
+        </div>
+      </el-collapse-transition>
+    </div>
   </div>
 </template>
 
@@ -268,5 +352,94 @@ function addSearchResult(request) {
 
 .add-condition-btn {
   margin-right: 12px;
+}
+
+.search-results-container {
+  border-top: 1px solid var(--el-border-color);
+  background: var(--el-bg-color);
+}
+
+.search-results-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  background: var(--el-fill-color-light);
+  user-select: none;
+}
+
+.search-results-header:hover {
+  background: var(--el-fill-color);
+}
+
+.results-title {
+  font-weight: 600;
+}
+
+.results-count {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.search-results-content {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.search-result-group {
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+.search-result-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.search-result-header:hover {
+  background: var(--el-fill-color-lighter);
+}
+
+.search-term {
+  flex: 1;
+  font-size: 13px;
+}
+
+.search-time {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.search-matches-list {
+  padding: 0 16px 12px;
+}
+
+.search-match-item {
+  display: flex;
+  gap: 12px;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.search-match-item:hover {
+  background: var(--el-fill-color-light);
+}
+
+.match-line {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  min-width: 40px;
+  text-align: right;
+}
+
+.match-message {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>
