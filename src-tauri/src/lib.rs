@@ -80,6 +80,12 @@ async fn search_entries(
                 if conds.is_empty() {
                     return Err("At least one condition required".to_string());
                 }
+                // Validate operators to prevent SQL injection
+                for cond in &conds {
+                    if !matches!(cond.operator.as_str(), "AND" | "OR") {
+                        return Err(format!("Invalid operator: '{}'. Must be AND or OR", cond.operator));
+                    }
+                }
                 query.push_str(" AND (");
                 for (i, cond) in conds.iter().enumerate() {
                     if i > 0 {
@@ -92,12 +98,12 @@ async fn search_entries(
                     }
                     params.push(Box::new(format!("%{}%", cond.term)));
                 }
-                query.push_str(")");
+                query.push_str(") ORDER BY timestamp ASC, id ASC");
             } else {
                 return Err("Conditions required for advanced search".to_string());
             }
         }
-        _ => return Err("Invalid search type".to_string())
+        _ => return Err(format!("Invalid search type '{}'. Valid types are: simple, advanced", search_type))
     }
 
     let db_manager = state.db_manager.lock()
