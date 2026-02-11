@@ -1,6 +1,9 @@
 use crate::log_parser::{Bookmark, LogEntry, TestSession};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
+// Re-export SearchResult from the parent module
+pub use crate::SearchResult;
+
 pub struct DatabaseManager {
     conn: Connection,
 }
@@ -740,5 +743,24 @@ impl DatabaseManager {
         }
 
         Ok(created_bookmarks)
+    }
+
+    pub fn search_entries_custom(&self, query: &str, params: &[Box<dyn rusqlite::ToSql>]) -> SqlResult<Vec<SearchResult>> {
+        let mut stmt = self.conn.prepare(query)?;
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut rows = stmt.query(&param_refs[..])?;
+
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            results.push(SearchResult {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                line_number: row.get(2)?,
+                message: row.get(3)?,
+            });
+        }
+
+        Ok(results)
     }
 }

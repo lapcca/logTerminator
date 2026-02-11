@@ -8,6 +8,7 @@ pub mod log_parser;
 use crate::bookmark_utils::{create_auto_bookmark, find_auto_bookmark_markers};
 use crate::database::DatabaseManager;
 use crate::log_parser::{Bookmark, HtmlLogParser, LogEntry, ScanResult, TestSession};
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{Emitter, State};
 
@@ -16,10 +17,68 @@ struct AppState {
     db_manager: Mutex<DatabaseManager>,
 }
 
+#[derive(Deserialize)]
+pub struct SearchCondition {
+    pub term: String,
+    pub operator: String,
+}
+
+#[derive(Serialize)]
+pub struct SearchResult {
+    pub id: i64,
+    pub timestamp: String,
+    pub line_number: i32,
+    pub message: String,
+}
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+#[tauri::command]
+async fn search_entries(
+    search_type: String,
+    search_term: Option<String>,
+    _conditions: Option<Vec<SearchCondition>>,
+    is_regex: bool,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SearchResult>, String> {
+    let mut query = String::from(
+        "SELECT id, timestamp, line_number, message
+         FROM log_entries
+         WHERE test_session_id = ?"
+    );
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(session_id)];
+
+    match search_type.as_str() {
+        "simple" => {
+            if let Some(term) = search_term {
+                if is_regex {
+                    query.push_str(" AND message REGEXP ?");
+                } else {
+                    query.push_str(" AND message LIKE ?");
+                }
+                params.push(Box::new(format!("%{}%", term)));
+            }
+        }
+        "advanced" => {
+            // Will implement in next task
+            return Err("Advanced search not implemented yet".to_string());
+        }
+        _ => return Err("Invalid search type".to_string())
+    }
+
+    let db_manager = state.db_manager.lock()
+        .map_err(|e| e.to_string())?;
+
+    // Use a private method approach by getting entries through the manager
+    let results = db_manager.search_entries_custom(&query, &params)
+        .map_err(|e| e.to_string())?;
+
+    Ok(results)
 }
 
 // Scan directory for test sessions without loading them
@@ -662,7 +721,8 @@ pub fn run() {
             save_last_directory,
             get_last_directory,
             get_log_history,
-            save_log_history_entry
+            save_log_history_entry,
+            search_entries
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
