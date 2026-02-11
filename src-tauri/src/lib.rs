@@ -52,7 +52,7 @@ fn greet(name: &str) -> String {
 async fn search_entries(
     search_type: String,
     search_term: Option<String>,
-    _conditions: Option<Vec<SearchCondition>>,
+    conditions: Option<Vec<SearchCondition>>,
     is_regex: bool,
     session_id: String,
     state: State<'_, AppState>,
@@ -76,8 +76,26 @@ async fn search_entries(
             }
         }
         "advanced" => {
-            // Will implement in next task
-            return Err("Advanced search not implemented yet".to_string());
+            if let Some(conds) = conditions {
+                if conds.is_empty() {
+                    return Err("At least one condition required".to_string());
+                }
+                query.push_str(" AND (");
+                for (i, cond) in conds.iter().enumerate() {
+                    if i > 0 {
+                        query.push_str(&format!(" {} ", cond.operator));
+                    }
+                    if is_regex {
+                        query.push_str("message REGEXP ?");
+                    } else {
+                        query.push_str("message LIKE ?");
+                    }
+                    params.push(Box::new(format!("%{}%", cond.term)));
+                }
+                query.push_str(")");
+            } else {
+                return Err("Conditions required for advanced search".to_string());
+            }
         }
         _ => return Err("Invalid search type".to_string())
     }
