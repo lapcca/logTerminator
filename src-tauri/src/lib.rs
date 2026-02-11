@@ -23,6 +23,17 @@ pub struct SearchCondition {
     pub operator: String,
 }
 
+#[derive(Deserialize)]
+struct SearchRequest {
+    search_type: String,
+    #[serde(default)]
+    search_term: Option<String>,
+    #[serde(default)]
+    conditions: Option<Vec<SearchCondition>>,
+    is_regex: bool,
+    session_id: String,
+}
+
 #[derive(Serialize)]
 pub struct SearchResult {
     pub id: i64,
