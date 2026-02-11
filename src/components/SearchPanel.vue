@@ -109,16 +109,19 @@ async function executeAdvancedSearch() {
 
   loading.value = true
   try {
+    // Deep copy conditions to avoid affecting previous results
+    const conditionsCopy = JSON.parse(JSON.stringify(searchState.conditions))
+
     const result = await invoke('search_entries', {
       searchType: 'advanced',
-      conditions: validConditions,
+      conditions: conditionsCopy,  // Use deep copy instead of reference
       isRegex: searchState.isRegexMode,
       sessionId: props.sessionId
     })
 
     addSearchResult({
       type: 'advanced',
-      conditions: validConditions,
+      conditions: conditionsCopy,  // Use deep copy
       matches: result
     })
   } catch (error) {
