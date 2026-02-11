@@ -2609,7 +2609,8 @@ function updatePinnedSize(size) {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 8px 0;
+  padding: 8px 20px;
+  margin: 0 -20px; /* Negative margin to extend background to edges */
 }
 
 .session-info {
