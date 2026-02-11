@@ -252,6 +252,7 @@ const resizeStartWidth = ref(0) // Sidebar width when drag starts
 const showSourceDialog = ref(false)
 const logSourceInput = ref('') // Combined input for both URL and folder path
 const logSourceInputRef = ref(null) // Ref for the input element
+const logSourceHistory = ref([]) // History entries for dropdown
 
 // Detect input type based on content
 const inputSourceType = computed(() => {
@@ -287,6 +288,37 @@ const testScanResults = ref([])
 const testScanLoading = ref(false)
 const pendingSourcePath = ref('')
 const pendingSourceIsHttp = ref(false)
+
+// Cache for session path colors
+const pathColorCache = new Map()
+
+// Simple string hash for color generation
+function stringHash(str) {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i)
+    hash = ((hash << 5) - hash) + char
+    hash = hash & hash
+  }
+  return Math.abs(hash)
+}
+
+// Generate pastel color from hash (HSL: high lightness for readability)
+function generatePathColor(path) {
+  if (!path) return 'hsl(0, 0%, 95%)' // Fallback for null/undefined
+  const hash = stringHash(path)
+  const hue = hash % 360
+  return `hsl(${hue}, 70%, 90%)`
+}
+
+// Get cached color for a path
+function getPathColor(path) {
+  if (!path) return 'hsl(0, 0%, 95%)' // Fallback
+  if (!pathColorCache.has(path)) {
+    pathColorCache.set(path, generatePathColor(path))
+  }
+  return pathColorCache.get(path)
+}
 
 // Toggle functions
 function toggleBookmarksPanel() {
@@ -499,6 +531,15 @@ async function scanTests(path, isHttp) {
       return
     }
 
+    // Save to history
+    try {
+      await invoke('save_log_history_entry', { entry: path })
+      // Refresh history
+      await loadLogSourceHistory()
+    } catch (error) {
+      console.error('Error saving to history:', error)
+    }
+
     // Show test selection dialog
     showTestSelectionDialog.value = true
   } catch (error) {
@@ -633,6 +674,23 @@ async function loadSessions() {
   } catch (error) {
     console.error('Error loading sessions:', error)
   }
+}
+
+// Load log source history
+async function loadLogSourceHistory() {
+  try {
+    const history = await invoke('get_log_history')
+    logSourceHistory.value = history
+  } catch (error) {
+    console.error('Error loading log history:', error)
+    logSourceHistory.value = []
+  }
+}
+
+// Truncate path to ~40 chars total for display (shows "..." + last 37 chars)
+function truncatePath(path) {
+  if (path.length <= 40) return path
+  return '...' + path.slice(-37)
 }
 
 // Confirm delete session
@@ -1421,7 +1479,9 @@ watch(sidebarWidth, (newWidth) => {
 })
 
 // Handle dialog opened event - focus input when dialog is fully opened
-function handleSourceDialogOpened() {
+async function handleSourceDialogOpened() {
+  // Load history when dialog opens
+  await loadLogSourceHistory()
   nextTick(() => {
     if (logSourceInputRef.value) {
       logSourceInputRef.value.focus()
@@ -1586,15 +1646,33 @@ function updatePinnedSize(size) {
           <span v-else>输入文件夹路径或 HTTP URL</span>
         </div>
         <div class="source-input-wrapper">
-          <el-input
+          <el-select
             ref="logSourceInputRef"
             v-model="logSourceInput"
+            filterable
+            allow-create
+            default-first-option
             :placeholder="inputSourceType === 'url' ? '例如: http://logs.example.com/test-logs/' : '选择或输入本地文件夹路径，或输入 HTTP URL'"
             :prefix-icon="inputSourceType === 'url' ? Link : Folder"
             clearable
             size="large"
             class="log-source-input"
-            @keyup.enter="handleSourceDialogEnter" />
+            popper-class="log-source-history-dropdown"
+            @clear="logSourceInput = ''"
+            @keyup.enter="handleSourceDialogEnter">
+            <el-option
+              v-for="(item, index) in logSourceHistory"
+              :key="item"
+              :label="item"
+              :value="item">
+              <el-tooltip :content="item" placement="left" :show-after="500">
+                <div class="history-option">
+                  <el-icon><component :is="inputSourceType === 'url' ? Link : Folder" /></el-icon>
+                  <span class="history-text-truncated">{{ truncatePath(item) }}</span>
+                </div>
+              </el-tooltip>
+            </el-option>
+          </el-select>
           <el-button
             v-if="inputSourceType === 'folder'"
             @click="selectLocalFolder"
@@ -1691,7 +1769,9 @@ function updatePinnedSize(size) {
                 :content="session.directory_path"
                 placement="right"
                 :show-after="300">
-                <div class="session-option-item">
+                <div
+                  class="session-option-item"
+                  :style="{ backgroundColor: getPathColor(session.directory_path) }">
                   <div class="session-info">
                     <el-icon><component :is="session.source_type === 'http' ? 'Link' : 'Folder'" /></el-icon>
                     <span class="session-name">{{ session.name }}</span>
@@ -1724,7 +1804,7 @@ function updatePinnedSize(size) {
             placeholder="搜索日志内容..."
             :prefix-icon="Search"
             clearable
-            style="width: 240px"
+            style="width: 360px"
             @input="debouncedSearch">
           </el-input>
 
@@ -1734,6 +1814,7 @@ function updatePinnedSize(size) {
             v-model="levelFilter"
             placeholder="日志级别"
             multiple
+            collapse-tags
             class="level-filter-select"
             :popper-options="{
               strategy: 'fixed',
@@ -2108,17 +2189,18 @@ function updatePinnedSize(size) {
   flex-shrink: 0;
 }
 
-/* Log level filter - dynamic width to align with table */
+/* Log level filter - simplified with reduced width */
 .level-filter-select {
-  flex: 0 0 auto !important;
-  width: calc(100vw - 1030px) !important;
-  min-width: 200px !important;
-  max-width: none !important;
+  flex: 0 1 auto !important;
+  width: auto !important;
+  min-width: 120px !important;
+  max-width: 300px !important;
 }
 
-/* When sidebar is collapsed, log level filter can be wider */
+/* When sidebar is collapsed, log level filter maintains consistent width */
 .sidebar-collapsed .level-filter-select {
-  width: calc(100vw - 430px) !important;
+  width: auto !important;
+  max-width: 300px !important;
 }
 
 .header-right {
@@ -2776,5 +2858,56 @@ function updatePinnedSize(size) {
 .message-tooltip-popover.is-pinned {
   position: fixed !important;
   transform: none !important;
+}
+
+/* Log Source History Dropdown Styles */
+.log-source-history-dropdown .history-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-source-history-dropdown .history-text-truncated {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Allow tooltips to display properly in dropdown */
+.log-source-history-dropdown .history-option {
+  width: 100%;
+}
+
+.log-source-history-dropdown .el-tooltip__popper {
+  z-index: 9999;
+}
+
+/* Fix clear button and dropdown arrow overlap in filterable select */
+.log-source-input .el-input__wrapper {
+  padding-right: 50px;
+}
+
+.log-source-input .el-input__suffix {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  right: 12px;
+}
+
+.log-source-input .el-select__caret {
+  position: relative;
+  z-index: 1;
+}
+
+.log-source-input .el-input__clear {
+  position: relative;
+  z-index: 2;
+  margin-right: 4px;
+}
+
+/* Ensure suffix elements are visible on hover */
+.log-source-input:hover .el-input__suffix,
+.log-source-input.is-focus .el-input__suffix {
+  display: flex;
 }
 </style>
