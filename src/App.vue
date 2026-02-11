@@ -199,18 +199,26 @@ const levelSelectRef = ref(null) // Ref for level filter select dropdown
 const expandedMessageIds = ref(new Set()) // Set of message IDs that are expanded
 const MESSAGE_LINE_LIMIT = 20 // Max lines to show before collapsing
 const CHAR_WIDTH = 9 // Approximate character width in pixels (for monospace font)
-const COLUMN_WIDTH = 400 // Approximate message column width in pixels
+const COLUMN_WIDTH = ref(400) // Dynamic message column width in pixels (will be calculated from actual table)
+const EXPAND_BUTTON_WIDTH = 22 // Width of expand button in pixels (16px + 3px padding + 2px margin + border)
+
+// Ref for the log table to get actual column widths
+const logTableRef = ref(null)
 
 // Calculate visual line count for a message using the correct formula:
 // 临时行数 = max((字符数 * 单个字符宽度 / 当前message列的宽度), 1)
 // 行数 = 临时行数 + 字符里的换行符个数
+// 注意: 计算时要减去折叠/展开按钮的宽度
 function calculateVisualLines(message) {
   if (!message) return 0
 
   const charCount = message.length
 
+  // 计算可用的消息列宽度 (总宽度 - 折叠按钮宽度)
+  const availableWidth = Math.max(COLUMN_WIDTH.value - EXPAND_BUTTON_WIDTH, 100)
+
   // 计算临时行数（确保最少有一行）
-  const tempLines = Math.max(Math.ceil(charCount * CHAR_WIDTH / COLUMN_WIDTH), 1)
+  const tempLines = Math.max(Math.ceil(charCount * CHAR_WIDTH / availableWidth), 1)
 
   // 计算换行符个数
   const newlineCount = (message.match(/\n/g) || []).length
@@ -756,6 +764,9 @@ async function refreshLogs() {
     totalEntries.value = total || 0
     console.log('Total entries from backend:', total, 'Items per page:', options.itemsPerPage, 'Calculated totalPages:', Math.ceil(total / options.itemsPerPage))
 
+    // Update message column width after logs are loaded
+    updateMessageColumnWidth()
+
     // Ensure auto-bookmarks are created for this session (only on page 1, i.e., when loading a new session)
     if (options.page === 1) {
       try {
@@ -1005,8 +1016,9 @@ function getDisplayMessage(row) {
 
   // Message needs to be collapsed
   // Calculate approximate max characters for MESSAGE_LINE_LIMIT lines
-  // Each line can fit approximately (COLUMN_WIDTH / CHAR_WIDTH) characters
-  const charsPerLine = Math.floor(COLUMN_WIDTH / CHAR_WIDTH)
+  // 每行可以容纳的字符数，需要考虑可用的消息列宽度 (总宽度 - 折叠按钮宽度)
+  const availableWidth = Math.max(COLUMN_WIDTH.value - EXPAND_BUTTON_WIDTH, 100)
+  const charsPerLine = Math.floor(availableWidth / CHAR_WIDTH)
   const maxChars = MESSAGE_LINE_LIMIT * charsPerLine
 
   // Truncate to max characters
@@ -1431,8 +1443,38 @@ onUnmounted(() => {
   document.removeEventListener('click', handleBookmarkPickerClickOutside)
 })
 
+// Update the message column width from the actual table
+function updateMessageColumnWidth() {
+  nextTick(() => {
+    if (logTableRef.value) {
+      // Get the message column from the table
+      const tableEl = logTableRef.value.$el
+      if (tableEl) {
+        // Find all column cells
+        const headerCells = tableEl.querySelectorAll('.el-table__header-wrapper thead th')
+        // The message column is the 4th column (after selection, timestamp, level, stack)
+        // Index 0: selection (checkbox)
+        // Index 1: timestamp (width: 180)
+        // Index 2: level (width: 90)
+        // Index 3: stack (width: 60)
+        // Index 4: message (dynamic)
+        if (headerCells.length > 4) {
+          const messageCell = headerCells[4]
+          const width = messageCell.getBoundingClientRect().width
+          if (width > 0) {
+            COLUMN_WIDTH.value = Math.floor(width)
+          }
+        }
+      }
+    }
+  })
+}
+
 // Handle window resize - clamp pinned tooltip to new bounds
 function handleWindowResize() {
+  // Update message column width on window resize
+  updateMessageColumnWidth()
+
   if (!pinnedTooltip.value.visible) return
 
   const maxX = window.innerWidth - pinnedTooltip.value.size.width
@@ -1590,6 +1632,20 @@ function getTableRowClassName({ row }) {
     classes.push('table-row-highlighted')
   }
   return classes.join(' ')
+}
+
+// Get row style (for bookmark background color)
+function getTableRowStyle({ row }) {
+  // Apply bookmark background color if row is bookmarked
+  if (isBookmarked(row.id)) {
+    const bookmark = bookmarks.value.find(b => b[0].log_entry_id === row.id)
+    if (bookmark && bookmark[0].color) {
+      return {
+        backgroundColor: getBookmarkBackgroundColor(bookmark[0].color)
+      }
+    }
+  }
+  return {}
 }
 
 // Handle pin request from MessageTooltip
@@ -1939,11 +1995,13 @@ function updatePinnedSize(size) {
             <!-- Log Table -->
             <el-card class="table-card" shadow="hover">
               <el-table
+                ref="logTableRef"
                 :data="logEntries"
                 :height="tableHeight"
                 v-loading="loading"
                 stripe
                 :row-class-name="getTableRowClassName"
+                :row-style="getTableRowStyle"
                 :row-key="(row) => row.id">
                 <el-table-column type="selection" width="50" />
                 <el-table-column prop="timestamp" label="时间戳" width="180">
@@ -2489,13 +2547,13 @@ function updatePinnedSize(size) {
 
 .expand-toggle {
   display: inline-block;
-  min-width: 24px;
-  padding: 2px 6px;
-  margin-right: 4px;
+  min-width: 16px;
+  padding: 0 3px;
+  margin-right: 2px;
   cursor: pointer;
   color: #409EFF;
   font-weight: bold;
-  font-size: 16px;
+  font-size: 12px;
   line-height: 1.4;
   user-select: none;
   flex-shrink: 0;
@@ -2503,7 +2561,7 @@ function updatePinnedSize(size) {
   position: relative;
   z-index: 10;
   border: 1px solid #409EFF;
-  border-radius: 4px;
+  border-radius: 3px;
   background-color: #ecf5ff;
 }
 
