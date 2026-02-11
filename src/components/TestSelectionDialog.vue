@@ -77,7 +77,7 @@ function isSomeSelected() {
   <el-dialog
     :model-value="visible"
     @update:model-value="val => !val && closeDialog()"
-    title="选择要加载的Test会话"
+    title="选择要加载的测试日志"
     width="600px"
     :close-on-click-modal="false"
     @closed="handleClosed"
@@ -86,7 +86,7 @@ function isSomeSelected() {
       <!-- Top hint -->
       <div class="top-hint">
         <el-icon class="hint-icon"><InfoFilled /></el-icon>
-        <span class="hint-text">找到 {{ testCount }} 个test会话，请选择要加载的项目</span>
+        <span class="hint-text">找到 {{ testCount }} 个测试日志，请选择要加载的项目</span>
       </div>
 
       <!-- Select all checkbox -->
@@ -128,7 +128,7 @@ function isSomeSelected() {
       <!-- Empty state -->
       <el-empty
         v-if="!loading && scanResults.length === 0"
-        description="未找到任何test会话"
+        description="未找到任何测试日志"
         :image-size="80" />
     </div>
 
@@ -136,7 +136,7 @@ function isSomeSelected() {
       <div class="dialog-footer">
         <div class="footer-hint">
           <el-icon><WarningFilled /></el-icon>
-          <span>已选择的test将覆盖现有数据</span>
+          <span>已选择的测试将覆盖现有数据(如果已经加载)</span>
         </div>
         <div class="footer-buttons">
           <el-button @click="closeDialog">取消</el-button>
@@ -144,7 +144,7 @@ function isSomeSelected() {
             type="primary"
             :disabled="!hasSelection || loading"
             @click="handleConfirm">
-            加载选中的 Test ({{ selectedCount }})
+            加载选中的测试日志 ({{ selectedCount }})
           </el-button>
         </div>
       </div>
