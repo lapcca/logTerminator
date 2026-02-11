@@ -164,6 +164,35 @@ function formatTime(timestamp) {
   return date.toLocaleTimeString()
 }
 
+function highlightMatch(message, searchRequest) {
+  let patterns = []
+
+  if (searchRequest.type === 'simple') {
+    patterns = [searchRequest.term]
+  } else {
+    patterns = searchRequest.conditions.map(c => c.term)
+  }
+
+  let highlighted = message
+  patterns.forEach(pattern => {
+    if (searchState.isRegexMode) {
+      try {
+        const regex = new RegExp(`(${pattern})`, 'gi')
+        highlighted = highlighted.replace(regex, '<span class="highlight">$1</span>')
+      } catch (e) {
+        // Invalid regex, skip highlighting
+      }
+    } else {
+      // Escape special regex characters for safe string matching
+      const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const regex = new RegExp(`(${escaped})`, 'gi')
+      highlighted = highlighted.replace(regex, '<span class="highlight">$1</span>')
+    }
+  })
+
+  return highlighted
+}
+
 function jumpToEntry(entryId) {
   emit('jump-to-entry', entryId)
 }
@@ -297,7 +326,7 @@ function jumpToEntry(entryId) {
                      class="search-match-item"
                      @click="jumpToEntry(match.id)">
                   <span class="match-line">{{ match.lineNumber }}</span>
-                  <span class="match-message">{{ match.message }}</span>
+                  <span class="match-message" v-html="highlightMatch(match.message, search.request)"></span>
                 </div>
               </div>
             </el-collapse-transition>
@@ -441,5 +470,13 @@ function jumpToEntry(entryId) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.match-message :deep(.highlight) {
+  background: var(--el-color-warning);
+  color: var(--el-color-danger);
+  font-weight: bold;
+  padding: 0 2px;
+  border-radius: 2px;
 }
 </style>
