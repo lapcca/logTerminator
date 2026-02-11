@@ -1658,16 +1658,19 @@ function updatePinnedSize(size) {
             size="large"
             class="log-source-input"
             popper-class="log-source-history-dropdown"
+            @clear="logSourceInput = ''"
             @keyup.enter="handleSourceDialogEnter">
             <el-option
               v-for="(item, index) in logSourceHistory"
               :key="item"
               :label="item"
               :value="item">
-              <div class="history-option">
-                <el-icon><component :is="inputSourceType === 'url' ? Link : Folder" /></el-icon>
-                <span class="history-text-truncated">{{ truncatePath(item) }}</span>
-              </div>
+              <el-tooltip :content="item" placement="left" :show-after="500">
+                <div class="history-option">
+                  <el-icon><component :is="inputSourceType === 'url' ? Link : Folder" /></el-icon>
+                  <span class="history-text-truncated">{{ truncatePath(item) }}</span>
+                </div>
+              </el-tooltip>
             </el-option>
           </el-select>
           <el-button
@@ -2868,5 +2871,43 @@ function updatePinnedSize(size) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Allow tooltips to display properly in dropdown */
+.log-source-history-dropdown .history-option {
+  width: 100%;
+}
+
+.log-source-history-dropdown .el-tooltip__popper {
+  z-index: 9999;
+}
+
+/* Fix clear button and dropdown arrow overlap in filterable select */
+.log-source-input .el-input__wrapper {
+  padding-right: 50px;
+}
+
+.log-source-input .el-input__suffix {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  right: 12px;
+}
+
+.log-source-input .el-select__caret {
+  position: relative;
+  z-index: 1;
+}
+
+.log-source-input .el-input__clear {
+  position: relative;
+  z-index: 2;
+  margin-right: 4px;
+}
+
+/* Ensure suffix elements are visible on hover */
+.log-source-input:hover .el-input__suffix,
+.log-source-input.is-focus .el-input__suffix {
+  display: flex;
 }
 </style>
