@@ -41,6 +41,29 @@ function toggleAdvancedMode() {
 function executeSimpleSearch() {
   // TODO: Implement in backend integration task
 }
+
+// Condition management functions
+function addCondition() {
+  searchState.conditions.push({
+    id: Date.now() + '_' + (searchState.conditions.length + 1),
+    term: '',
+    operator: 'AND'
+  })
+}
+
+function removeCondition(index) {
+  searchState.conditions.splice(index, 1)
+}
+
+function executeAdvancedSearch() {
+  const validConditions = searchState.conditions.filter(c => c.term.trim())
+  if (validConditions.length === 0) {
+    ElMessage.warning('请输入至少一个搜索条件')
+    return
+  }
+  // Will be implemented in backend integration task
+  console.log('Advanced search:', validConditions)
+}
 </script>
 
 <template>
@@ -77,6 +100,59 @@ function executeSimpleSearch() {
         </el-tooltip>
       </template>
     </el-input>
+
+    <!-- Advanced Search Panel -->
+    <el-collapse-transition>
+      <div v-show="searchState.isAdvancedMode" class="advanced-search-panel">
+        <el-card shadow="never">
+          <!-- Search condition rows -->
+          <div v-for="(condition, index) in searchState.conditions"
+               :key="condition.id"
+               class="search-condition-row">
+
+            <!-- AND/OR selector -->
+            <el-select
+              v-if="index > 0"
+              v-model="condition.operator"
+              class="operator-select">
+              <el-option label="AND" value="AND" />
+              <el-option label="OR" value="OR" />
+            </el-select>
+
+            <!-- Condition input -->
+            <el-input
+              v-model="condition.term"
+              placeholder="输入搜索条件..."
+              :prefix-icon="Search"
+              clearable />
+
+            <!-- Delete button -->
+            <el-button
+              v-if="searchState.conditions.length > 1"
+              :icon="Delete"
+              circle
+              size="small"
+              @click="removeCondition(index)" />
+          </div>
+
+          <!-- Add condition button -->
+          <el-button
+            :icon="Plus"
+            @click="addCondition"
+            class="add-condition-btn">
+            添加条件
+          </el-button>
+
+          <!-- Search button -->
+          <el-button
+            type="primary"
+            :icon="Search"
+            @click="executeAdvancedSearch">
+            搜索
+          </el-button>
+        </el-card>
+      </div>
+    </el-collapse-transition>
   </div>
 </template>
 
@@ -105,5 +181,24 @@ function executeSimpleSearch() {
 .regex-active,
 .advanced-active {
   color: var(--el-color-primary);
+}
+
+.advanced-search-panel {
+  margin-top: 12px;
+}
+
+.search-condition-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.operator-select {
+  width: 80px;
+}
+
+.add-condition-btn {
+  margin-right: 12px;
 }
 </style>
