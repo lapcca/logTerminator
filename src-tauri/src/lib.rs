@@ -8,18 +8,257 @@ pub mod log_parser;
 use crate::bookmark_utils::{create_auto_bookmark, find_auto_bookmark_markers};
 use crate::database::DatabaseManager;
 use crate::log_parser::{Bookmark, HtmlLogParser, LogEntry, ScanResult, TestSession};
+use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::{Emitter, State};
+use regex::RegexBuilder;
 
 // App state
 struct AppState {
     db_manager: Mutex<DatabaseManager>,
 }
 
+#[derive(Deserialize)]
+pub struct SearchCondition {
+    pub term: String,
+    pub operator: String,
+}
+
+#[derive(Deserialize)]
+struct SearchRequest {
+    search_type: String,
+    #[serde(default)]
+    search_term: Option<String>,
+    #[serde(default)]
+    conditions: Option<Vec<SearchCondition>>,
+    is_regex: bool,
+    #[serde(default)]
+    case_sensitive: bool,
+    session_id: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SearchResult {
+    pub id: i64,
+    pub timestamp: String,
+    pub line_number: i32,
+    pub message: String,
+}
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+#[tauri::command]
+async fn search_entries(
+    search_type: String,
+    search_term: Option<String>,
+    conditions: Option<Vec<SearchCondition>>,
+    is_regex: bool,
+    case_sensitive: Option<bool>,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SearchResult>, String> {
+    let case_sensitive = case_sensitive.unwrap_or(false);
+    let db_manager = state.db_manager.lock()
+        .map_err(|e| e.to_string())?;
+
+    // For regex search, fetch all entries and filter in Rust
+    if is_regex {
+        let mut query = String::from(
+            "SELECT id, timestamp, line_number, message
+             FROM log_entries
+             WHERE test_session_id = ? ORDER BY timestamp ASC, id ASC"
+        );
+        let params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(session_id.clone())];
+
+        let all_results = db_manager.search_entries_custom(&query, &params)
+            .map_err(|e| e.to_string())?;
+
+        return match search_type.as_str() {
+            "simple" => {
+                if let Some(term) = search_term {
+                    let re = RegexBuilder::new(&term)
+                        .case_insensitive(!case_sensitive)
+                        .build()
+                        .map_err(|e| format!("Invalid regex: {}", e))?;
+                    let filtered: Vec<SearchResult> = all_results.into_iter()
+                        .filter(|r| re.is_match(&r.message))
+                        .collect();
+                    Ok(filtered)
+                } else {
+                    Ok(all_results)
+                }
+            }
+            "advanced" => {
+                if let Some(conds) = conditions {
+                    if conds.is_empty() {
+                        return Err("At least one condition required".to_string());
+                    }
+
+                    // Compile all regex patterns first
+                    let mut patterns: Vec<(regex::Regex, String)> = Vec::new();
+                    for (i, cond) in conds.iter().enumerate() {
+                        let re = RegexBuilder::new(&cond.term)
+                            .case_insensitive(!case_sensitive)
+                            .build()
+                            .map_err(|e| format!("Invalid regex in condition {}: {}", i + 1, e))?;
+                        patterns.push((re, cond.operator.clone()));
+                    }
+
+                    // Apply AND/OR logic
+                    let mut results: std::collections::HashMap<i64, SearchResult> = std::collections::HashMap::new();
+
+                    for (idx, (re, operator)) in patterns.iter().enumerate() {
+                        if idx == 0 {
+                            // First condition: add all matching results
+                            for r in &all_results {
+                                if re.is_match(&r.message) {
+                                    results.insert(r.id, r.clone());
+                                }
+                            }
+                        } else {
+                            // Use the PREVIOUS condition's operator to decide how to combine
+                            let prev_operator = &patterns[idx - 1].1;
+                            if prev_operator == "AND" {
+                                // AND: keep only items that match this pattern too
+                                results.retain(|_, r| re.is_match(&r.message));
+                            } else if prev_operator == "OR" {
+                                // OR: add items that match this pattern
+                                for r in &all_results {
+                                    if re.is_match(&r.message) {
+                                        results.entry(r.id).or_insert_with(|| r.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Ok(results.into_values().collect())
+                } else {
+                    Err("Conditions required for advanced search".to_string())
+                }
+            }
+            _ => Err(format!("Invalid search type '{}'. Valid types are: simple, advanced", search_type))
+        };
+    }
+
+    // For non-regex search, use database LIKE query
+    let mut query = String::from(
+        "SELECT id, timestamp, line_number, message
+         FROM log_entries
+         WHERE test_session_id = ?"
+    );
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(session_id)];
+
+    match search_type.as_str() {
+        "simple" => {
+            if let Some(term) = search_term {
+                if case_sensitive {
+                    // For case-sensitive search, we need to filter in Rust
+                    query.push_str(" ORDER BY timestamp ASC, id ASC");
+                    let all_results = db_manager.search_entries_custom(&query, &params)
+                        .map_err(|e| e.to_string())?;
+                    let filtered: Vec<SearchResult> = all_results.into_iter()
+                        .filter(|r| r.message.contains(&term))
+                        .collect();
+                    return Ok(filtered);
+                } else {
+                    query.push_str(" AND message LIKE ?");
+                    params.push(Box::new(format!("%{}%", term)));
+                }
+            }
+        }
+        "advanced" => {
+            if let Some(conds) = conditions {
+                if conds.is_empty() {
+                    return Err("At least one condition required".to_string());
+                }
+                // For case-sensitive search, we need to filter in Rust
+                if case_sensitive {
+                    query.push_str(" ORDER BY timestamp ASC, id ASC");
+                    let all_results = db_manager.search_entries_custom(&query, &params)
+                        .map_err(|e| e.to_string())?;
+
+                    // Apply AND/OR logic with case-sensitive matching
+                    let mut results: std::collections::HashMap<i64, SearchResult> = std::collections::HashMap::new();
+
+                    for (idx, cond) in conds.iter().enumerate() {
+                        if idx == 0 {
+                            // First condition: add all matching results
+                            for r in &all_results {
+                                if r.message.contains(&cond.term) {
+                                    results.insert(r.id, r.clone());
+                                }
+                            }
+                        } else {
+                            // Use the PREVIOUS condition's operator to decide how to combine
+                            let prev_operator = &conds[idx - 1].operator;
+                            if prev_operator == "AND" {
+                                // AND: keep only items that match this pattern too
+                                results.retain(|_, r| r.message.contains(&cond.term));
+                            } else if prev_operator == "OR" {
+                                // OR: add items that match this pattern
+                                for r in &all_results {
+                                    if r.message.contains(&cond.term) {
+                                        results.entry(r.id).or_insert_with(|| r.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    return Ok(results.into_values().collect());
+                }
+
+                // Case-insensitive: use database LIKE
+                // Validate operators to prevent SQL injection
+                for cond in &conds {
+                    if !matches!(cond.operator.as_str(), "AND" | "OR") {
+                        return Err(format!("Invalid operator: '{}'. Must be AND or OR", cond.operator));
+                    }
+                }
+                query.push_str(" AND (");
+                for (i, cond) in conds.iter().enumerate() {
+                    if i > 0 {
+                        // The operator selector in UI is shown for each condition (except first)
+                        // and represents how THIS condition connects to the PREVIOUS one
+                        // So for condition at index i, its operator connects i-1 and i
+                        query.push_str(&format!(" {} ", cond.operator));
+                    }
+                    query.push_str("message LIKE ?");
+                    params.push(Box::new(format!("%{}%", cond.term)));
+                }
+                query.push_str(") ORDER BY timestamp ASC, id ASC");
+                log::info!("Advanced search query: {}", query);
+                log::info!("Conditions: {:?}", conds.iter().map(|c| (&c.term, &c.operator)).collect::<Vec<_>>());
+            } else {
+                return Err("Conditions required for advanced search".to_string());
+            }
+        }
+        _ => return Err(format!("Invalid search type '{}'. Valid types are: simple, advanced", search_type))
+    }
+
+    let results = db_manager.search_entries_custom(&query, &params)
+        .map_err(|e| e.to_string())?;
+
+    Ok(results)
+}
+
+#[tauri::command]
+fn find_entry_page(
+    session_id: String,
+    entry_id: i64,
+    items_per_page: usize,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let db_manager = state.db_manager.lock()
+        .map_err(|e| e.to_string())?;
+
+    db_manager.find_entry_page_simple(&session_id, entry_id, items_per_page)
+        .map_err(|e| format!("Failed to find entry page: {}", e))
 }
 
 // Scan directory for test sessions without loading them
@@ -662,7 +901,9 @@ pub fn run() {
             save_last_directory,
             get_last_directory,
             get_log_history,
-            save_log_history_entry
+            save_log_history_entry,
+            search_entries,
+            find_entry_page
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

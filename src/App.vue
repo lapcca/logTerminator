@@ -34,6 +34,8 @@ import {
 import MessageTooltip from './components/MessageTooltip.vue'
 import TestSelectionDialog from './components/TestSelectionDialog.vue'
 import BookmarkColorPicker from './components/BookmarkColorPicker.vue'
+import SearchPanel from './components/SearchPanel.vue'
+import SearchResultsPanel from './components/SearchResultsPanel.vue'
 import { parsePythonStackTrace, getStackPreview, isPythonStackTrace } from './utils/stackParser.js'
 import { formatMessage } from './utils/messageFormatter.js'
 
@@ -194,6 +196,14 @@ const selectedEntryIds = ref([]) // 选中的日志条目ID
 const highlightedEntryId = ref(null) // 当前高亮的条目ID
 const jumpToPage = ref(1) // 跳转到页码输入框的值
 const levelSelectRef = ref(null) // Ref for level filter select dropdown
+const searchPanelRef = ref(null) // Ref for SearchPanel component
+
+// Search results state
+const searchResults = reactive({
+  history: [],
+  totalMatchCount: 0,
+  hasResults: false
+})
 
 // Message expand/collapse state
 const expandedMessageIds = ref(new Set()) // Set of message IDs that are expanded
@@ -336,7 +346,7 @@ function toggleBookmarksPanel() {
 // Data table options
 const options = reactive({
   page: 1,
-  itemsPerPage: 100,
+  itemsPerPage: 800,
   sortBy: ['timestamp'],
   sortDesc: [false]
 })
@@ -346,11 +356,9 @@ const currentPageForScroll = ref(1)
 
 // Items per page options
 const itemsPerPageOptions = [
-  { title: '25 条/页', value: 25 },
-  { title: '50 条/页', value: 50 },
-  { title: '100 条/页', value: 100 },
-  { title: '200 条/页', value: 200 },
-  { title: '500 条/页', value: 500 },
+  { title: '800 条/页', value: 800 },
+  { title: '1600 条/页', value: 1600 },
+  { title: '所有', value: 999999 }
 ]
 
 // Priority order for log levels (higher priority first)
@@ -1348,6 +1356,103 @@ async function jumpToBookmark(bookmark) {
   }
 }
 
+// Handle search results updated from SearchPanel
+function handleSearchResultsUpdated(data) {
+  searchResults.history = data.history
+  searchResults.totalMatchCount = data.totalMatchCount
+  searchResults.hasResults = data.hasResults
+}
+
+// Jump to entry from search results
+async function jumpToEntry(entryId) {
+  if (!entryId) return
+
+  try {
+    // Get the page number for this entry
+    const entryPage = await invoke('get_entry_page', {
+      entryId: entryId,
+      itemsPerPage: options.itemsPerPage,
+      levelFilter: levelFilter.value,
+      searchTerm: searchTerm.value
+    })
+
+    if (entryPage === null) {
+      alert('搜索结果对应的日志条目不存在')
+      return
+    }
+
+    // Navigate to the correct page
+    if (entryPage !== options.page) {
+      options.page = entryPage
+      currentPageForScroll.value = entryPage
+      await refreshLogs()
+      // Wait for render then highlight
+      await nextTick()
+      setTimeout(() => highlightAndScroll(entryId), 150)
+    } else {
+      // Already on correct page, just highlight
+      highlightAndScroll(entryId)
+    }
+  } catch (error) {
+    console.error('Error jumping to entry:', error)
+    alert('跳转到日志条目时出错')
+  }
+}
+
+// Handle clear search history from SearchResultsPanel
+function handleClearSearchHistory() {
+  if (searchPanelRef.value) {
+    searchPanelRef.value.clearSearchHistory()
+  }
+  // Reset local state
+  searchResults.history = []
+  searchResults.totalMatchCount = 0
+  searchResults.hasResults = false
+}
+
+// Handle toggle search group from SearchResultsPanel
+function handleToggleSearchGroup(id) {
+  if (searchPanelRef.value) {
+    searchPanelRef.value.toggleSearchGroup(id)
+  }
+}
+
+// Handle delete search result from SearchResultsPanel
+function handleDeleteSearchResult(searchId, resultIndex, deleteAll = false) {
+  if (!searchPanelRef.value) return
+
+  // Find the search result by searchId
+  const searchIndex = searchResults.history.findIndex(s => s.id === searchId)
+  if (searchIndex === -1) return
+
+  const search = searchResults.history[searchIndex]
+
+  // If deleteAll is true, remove the entire search result group
+  if (deleteAll) {
+    searchResults.history.splice(searchIndex, 1)
+  } else if (resultIndex !== undefined && search.matches) {
+    // Remove the match at the specified index
+    if (resultIndex >= 0 && resultIndex < search.matches.length) {
+      search.matches.splice(resultIndex, 1)
+    }
+
+    // If no more matches left, remove the entire search result
+    if (search.matches.length === 0) {
+      searchResults.history.splice(searchIndex, 1)
+    }
+  }
+
+  // Update total count
+  searchResults.totalMatchCount = searchResults.history.reduce(
+    (sum, s) => sum + (s.matches?.length || 0), 0
+  )
+
+  // If no more results, hide the panel
+  if (searchResults.history.length === 0) {
+    searchResults.hasResults = false
+  }
+}
+
 // Handle JSON detected in message
 function handleJsonDetected(entryId, data) {
   console.log('JSON detected in entry', entryId, ':', data)
@@ -1854,15 +1959,12 @@ function updatePinnedSize(size) {
             打开目录
           </el-button>
 
-          <!-- Search Input -->
-          <el-input
-            v-model="searchTerm"
-            placeholder="搜索日志内容..."
-            :prefix-icon="Search"
-            clearable
-            style="width: 360px"
-            @input="debouncedSearch">
-          </el-input>
+          <!-- Search Panel -->
+          <SearchPanel
+            ref="searchPanelRef"
+            :session-id="currentSession"
+            @search-results-updated="handleSearchResultsUpdated"
+            @jump-to-entry="jumpToEntry" />
 
           <!-- Log Level Filter -->
           <el-select
@@ -2149,7 +2251,7 @@ function updatePinnedSize(size) {
                 <el-pagination
                   v-model:current-page="options.page"
                   v-model:page-size="options.itemsPerPage"
-                  :page-sizes="[25, 50, 100, 200, 500]"
+                  :page-sizes="[800, 1600, 999999]"
                   :total="totalEntries"
                   layout="prev, pager, next, jumper, ->, sizes, total"
                   background
@@ -2157,6 +2259,18 @@ function updatePinnedSize(size) {
                   @size-change="handleSizeChange" />
               </div>
             </el-card>
+
+            <!-- Search Results Panel -->
+            <SearchResultsPanel
+              v-if="searchResults.hasResults"
+              :search-history="searchResults.history"
+              :total-match-count="searchResults.totalMatchCount"
+              :is-regex-mode="searchPanelRef?.searchState?.isRegexMode || false"
+              :is-case-sensitive="searchPanelRef?.searchState?.isCaseSensitive || false"
+              @jump-to-entry="jumpToEntry"
+              @clear-history="handleClearSearchHistory"
+              @toggle-search-group="handleToggleSearchGroup"
+              @delete-search-result="handleDeleteSearchResult" />
           </div>
         </div>
       </div>
@@ -2172,6 +2286,17 @@ function updatePinnedSize(size) {
   display: flex;
   flex-direction: column;
   background: #f5f7fa;
+  overflow: hidden;
+}
+
+/* Hide scrollbars for main window */
+.app-container::-webkit-scrollbar {
+  display: none;
+}
+
+.app-container {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* App Header Styles */
@@ -2251,14 +2376,14 @@ function updatePinnedSize(size) {
 .level-filter-select {
   flex: 0 1 auto !important;
   width: auto !important;
-  min-width: 120px !important;
-  max-width: 300px !important;
+  min-width: 100px !important;
+  max-width: 200px !important;
 }
 
 /* When sidebar is collapsed, log level filter maintains consistent width */
 .sidebar-collapsed .level-filter-select {
   width: auto !important;
-  max-width: 300px !important;
+  max-width: 200px !important;
 }
 
 .header-right {
@@ -2854,6 +2979,17 @@ function updatePinnedSize(size) {
 </style>
 
 <style>
+/* Hide scrollbars globally */
+body {
+  overflow: hidden;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+body::-webkit-scrollbar {
+  display: none;
+}
+
 /* Message Tooltip Popover Styles */
 .message-tooltip-popover {
   max-width: 80%;

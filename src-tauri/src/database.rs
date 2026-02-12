@@ -1,6 +1,9 @@
 use crate::log_parser::{Bookmark, LogEntry, TestSession};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
+// Re-export SearchResult from the parent module
+pub use crate::SearchResult;
+
 pub struct DatabaseManager {
     conn: Connection,
 }
@@ -489,6 +492,35 @@ impl DatabaseManager {
         level_iter.collect()
     }
 
+    /// Get the page number for a specific log entry without filters (for search result jumping).
+    ///
+    /// Counts entries that come before the target entry in the same session,
+    /// ordered by timestamp ASC, id ASC.
+    pub fn find_entry_page_simple(
+        &self,
+        session_id: &str,
+        entry_id: i64,
+        items_per_page: usize,
+    ) -> SqlResult<usize> {
+        // First get the timestamp for the target entry
+        let entry_timestamp: String = self.conn.query_row(
+            "SELECT timestamp FROM log_entries WHERE test_session_id = ? AND id = ?",
+            [session_id, &entry_id.to_string()],
+            |row| row.get(0),
+        )?;
+
+        // Count entries before this one (same ordering as get_log_entries: timestamp ASC, id ASC)
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM log_entries
+             WHERE test_session_id = ? AND ((timestamp < ?) OR (timestamp = ? AND id < ?))",
+            [session_id, &entry_timestamp, &entry_timestamp, &entry_id.to_string()],
+            |row| row.get(0),
+        )?;
+
+        let page = (count as usize) / items_per_page + 1;
+        Ok(page)
+    }
+
     /// Query entries with failure anchor markers for a session.
     ///
     /// Returns entry IDs where message ends with [FAIL] marker.
@@ -740,5 +772,24 @@ impl DatabaseManager {
         }
 
         Ok(created_bookmarks)
+    }
+
+    pub fn search_entries_custom(&self, query: &str, params: &[Box<dyn rusqlite::ToSql>]) -> SqlResult<Vec<SearchResult>> {
+        let mut stmt = self.conn.prepare(query)?;
+
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut rows = stmt.query(&param_refs[..])?;
+
+        let mut results = Vec::new();
+        while let Some(row) = rows.next()? {
+            results.push(SearchResult {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                line_number: row.get(2)?,
+                message: row.get(3)?,
+            });
+        }
+
+        Ok(results)
     }
 }
