@@ -346,7 +346,7 @@ function toggleBookmarksPanel() {
 // Data table options
 const options = reactive({
   page: 1,
-  itemsPerPage: 100,
+  itemsPerPage: 800,
   sortBy: ['timestamp'],
   sortDesc: [false]
 })
@@ -356,11 +356,9 @@ const currentPageForScroll = ref(1)
 
 // Items per page options
 const itemsPerPageOptions = [
-  { title: '25 条/页', value: 25 },
-  { title: '50 条/页', value: 50 },
-  { title: '100 条/页', value: 100 },
-  { title: '200 条/页', value: 200 },
-  { title: '500 条/页', value: 500 },
+  { title: '800 条/页', value: 800 },
+  { title: '1600 条/页', value: 1600 },
+  { title: '所有', value: 999999 }
 ]
 
 // Priority order for log levels (higher priority first)
@@ -1420,21 +1418,28 @@ function handleToggleSearchGroup(id) {
 }
 
 // Handle delete search result from SearchResultsPanel
-function handleDeleteSearchResult(searchId, resultIndex) {
+function handleDeleteSearchResult(searchId, resultIndex, deleteAll = false) {
   if (!searchPanelRef.value) return
 
-  // Get the search result at the specified index
-  const search = searchResults.history[resultIndex]
-  if (!search) return
+  // Find the search result by searchId
+  const searchIndex = searchResults.history.findIndex(s => s.id === searchId)
+  if (searchIndex === -1) return
 
-  // Remove the match at the specified index
-  if (search.matches && search.matches.length > resultIndex) {
-    search.matches.splice(resultIndex, 1)
-  }
+  const search = searchResults.history[searchIndex]
 
-  // If no more matches left, remove the entire search result
-  if (search.matches && search.matches.length === 0) {
-    searchResults.history.splice(resultIndex, 1)
+  // If deleteAll is true, remove the entire search result group
+  if (deleteAll) {
+    searchResults.history.splice(searchIndex, 1)
+  } else if (resultIndex !== undefined && search.matches) {
+    // Remove the match at the specified index
+    if (resultIndex >= 0 && resultIndex < search.matches.length) {
+      search.matches.splice(resultIndex, 1)
+    }
+
+    // If no more matches left, remove the entire search result
+    if (search.matches.length === 0) {
+      searchResults.history.splice(searchIndex, 1)
+    }
   }
 
   // Update total count
@@ -2246,7 +2251,7 @@ function updatePinnedSize(size) {
                 <el-pagination
                   v-model:current-page="options.page"
                   v-model:page-size="options.itemsPerPage"
-                  :page-sizes="[25, 50, 100, 200, 500]"
+                  :page-sizes="[800, 1600, 999999]"
                   :total="totalEntries"
                   layout="prev, pager, next, jumper, ->, sizes, total"
                   background
@@ -2261,6 +2266,7 @@ function updatePinnedSize(size) {
               :search-history="searchResults.history"
               :total-match-count="searchResults.totalMatchCount"
               :is-regex-mode="searchPanelRef?.searchState?.isRegexMode || false"
+              :is-case-sensitive="searchPanelRef?.searchState?.isCaseSensitive || false"
               @jump-to-entry="jumpToEntry"
               @clear-history="handleClearSearchHistory"
               @toggle-search-group="handleToggleSearchGroup"
@@ -2280,6 +2286,17 @@ function updatePinnedSize(size) {
   display: flex;
   flex-direction: column;
   background: #f5f7fa;
+  overflow: hidden;
+}
+
+/* Hide scrollbars for main window */
+.app-container::-webkit-scrollbar {
+  display: none;
+}
+
+.app-container {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 /* App Header Styles */
@@ -2359,14 +2376,14 @@ function updatePinnedSize(size) {
 .level-filter-select {
   flex: 0 1 auto !important;
   width: auto !important;
-  min-width: 120px !important;
-  max-width: 300px !important;
+  min-width: 100px !important;
+  max-width: 200px !important;
 }
 
 /* When sidebar is collapsed, log level filter maintains consistent width */
 .sidebar-collapsed .level-filter-select {
   width: auto !important;
-  max-width: 300px !important;
+  max-width: 200px !important;
 }
 
 .header-right {
@@ -2962,6 +2979,17 @@ function updatePinnedSize(size) {
 </style>
 
 <style>
+/* Hide scrollbars globally */
+body {
+  overflow: hidden;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+body::-webkit-scrollbar {
+  display: none;
+}
+
 /* Message Tooltip Popover Styles */
 .message-tooltip-popover {
   max-width: 80%;

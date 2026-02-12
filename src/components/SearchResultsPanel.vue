@@ -1,6 +1,6 @@
 <script setup>
-import { ref } from 'vue'
-import { Delete, ArrowDown, ArrowUp, ArrowRight, ArrowLeft } from '@element-plus/icons-vue'
+import { ref, watch, nextTick } from 'vue'
+import { Delete, ArrowDown, ArrowUp, ArrowRight, ArrowLeft, Close } from '@element-plus/icons-vue'
 
 const props = defineProps({
   searchHistory: {
@@ -15,6 +15,10 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  isCaseSensitive: {
+    type: Boolean,
+    default: false
+  },
   // Callback functions for parent to call
   onToggleSearchGroup: {
     type: Function,
@@ -26,9 +30,10 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['jump-to-entry'])
+const emit = defineEmits(['jump-to-entry', 'delete-search-result', 'clear-history'])
 
 const showSearchResults = ref(true)
+const searchResultsContentRef = ref(null)
 
 function toggleSearchResults() {
   showSearchResults.value = !showSearchResults.value
@@ -39,10 +44,8 @@ function toggleSearchGroup(id) {
 }
 
 function clearSearchHistory() {
-  // Call parent's clear handler
-  if (props.onClearSearchHistory) {
-    props.onClearSearchHistory()
-  }
+  // Emit clear-history event to parent
+  emit('clear-history')
 }
 
 function displaySearchTerm(search) {
@@ -54,8 +57,20 @@ function displaySearchTerm(search) {
   if (searchType === 'simple') {
     return request.term
   } else if (searchType === 'advanced') {
-    // Only show terms, not operators
-    return request.conditions.map(c => c.term).join(' ')
+    // Show terms with operators between them
+    const parts = []
+    for (let i = 0; i < request.conditions.length; i++) {
+      const cond = request.conditions[i]
+      parts.push(`"${cond.term}"`)
+      if (i < request.conditions.length - 1) {
+        // Add the operator from the NEXT condition (which connects current and next)
+        const nextCond = request.conditions[i + 1]
+        if (nextCond && nextCond.operator) {
+          parts.push(nextCond.operator)
+        }
+      }
+    }
+    return parts.join(' ')
   }
   return ''
 }
@@ -81,7 +96,8 @@ function highlightMatch(message, searchRequest) {
   patterns.forEach(pattern => {
     if (props.isRegexMode) {
       try {
-        const regex = new RegExp(`(${pattern})`, 'gi')
+        const flags = props.isCaseSensitive ? 'g' : 'gi'
+        const regex = new RegExp(`(${pattern})`, flags)
         highlighted = highlighted.replace(regex, '<span class="highlight">$1</span>')
       } catch (e) {
         // Invalid regex, skip highlighting
@@ -89,7 +105,8 @@ function highlightMatch(message, searchRequest) {
     } else {
       // Escape special regex characters for safe string matching
       const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const regex = new RegExp(`(${escaped})`, 'gi')
+      const flags = props.isCaseSensitive ? 'g' : 'gi'
+      const regex = new RegExp(`(${escaped})`, flags)
       highlighted = highlighted.replace(regex, '<span class="highlight">$1</span>')
     }
   })
@@ -105,6 +122,42 @@ function handleDeleteSearchResult(searchId, resultIndex) {
   // Emit delete event to parent
   emit('delete-search-result', { searchId, resultIndex })
 }
+
+function handleDeleteSingleSearch(searchId) {
+  // Emit delete event to parent to delete entire search result group
+  // Emit as separate parameters to match handler signature
+  emit('delete-search-result', searchId, undefined, true)
+}
+
+// Auto-scroll to latest search result when searchHistory updates
+watch(() => props.searchHistory, (newHistory, oldHistory) => {
+  if (!newHistory || newHistory.length === 0) return
+
+  // Check if there's a new search result (different ID or length increased)
+  const oldIds = oldHistory ? new Set(oldHistory.map(s => s.id)) : new Set()
+  const hasNewResult = newHistory.some(s => !oldIds.has(s.id))
+
+  if (hasNewResult) {
+    console.log('[SearchResultsPanel] New search result detected, scrolling to top')
+    // New search result added, scroll to top (newest result)
+    nextTick(() => {
+      setTimeout(() => {
+        // Try multiple methods to scroll
+        if (searchResultsContentRef.value) {
+          console.log('[SearchResultsPanel] Using ref to scroll')
+          searchResultsContentRef.value.scrollTop = 0
+        }
+
+        const container = document.querySelector('.search-results-content')
+        if (container) {
+          console.log('[SearchResultsPanel] Using querySelector to scroll, current scrollTop:', container.scrollTop)
+          container.scrollTop = 0
+          console.log('[SearchResultsPanel] After setting, scrollTop:', container.scrollTop)
+        }
+      }, 150)
+    })
+  }
+}, { deep: true })
 </script>
 
 <template>
@@ -126,18 +179,27 @@ function handleDeleteSearchResult(searchId, resultIndex) {
     </div>
 
     <el-collapse-transition>
-      <div v-show="showSearchResults" class="search-results-content">
+      <div v-show="showSearchResults" class="search-results-content" ref="searchResultsContentRef">
         <div v-for="search in searchHistory"
              :key="search.id"
              class="search-result-group">
-          <div class="search-result-header" @click="toggleSearchGroup(search.id)">
-            <el-icon>
-              <ArrowRight v-if="!search.expanded" />
-              <ArrowDown v-else />
-            </el-icon>
-            <span class="search-term">{{ displaySearchTerm(search) }}</span>
-            <el-tag size="small" type="info">{{ search.matches.length }} 条</el-tag>
-            <span class="search-time">{{ formatTime(search.timestamp) }}</span>
+          <div class="search-result-header">
+            <div class="search-result-header-left" @click="toggleSearchGroup(search.id)">
+              <el-icon>
+                <ArrowRight v-if="!search.expanded" />
+                <ArrowDown v-else />
+              </el-icon>
+              <span class="search-term">{{ displaySearchTerm(search) }}</span>
+              <el-tag size="small" type="info">{{ search.matches.length }} 条</el-tag>
+              <span class="search-time">{{ formatTime(search.timestamp) }}</span>
+            </div>
+            <el-button
+              :icon="Close"
+              text
+              size="small"
+              class="delete-search-btn"
+              @click.stop="handleDeleteSingleSearch(search.id)">
+            </el-button>
           </div>
 
           <el-collapse-transition>
@@ -192,6 +254,7 @@ function handleDeleteSearchResult(searchId, resultIndex) {
 .search-results-content {
   max-height: 300px;
   overflow-y: auto;
+  overflow-x: auto;
 }
 
 .search-result-group {
@@ -205,9 +268,27 @@ function handleDeleteSearchResult(searchId, resultIndex) {
 .search-result-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   padding: 8px 16px;
+}
+
+.search-result-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
   cursor: pointer;
+  min-width: 0;
+}
+
+.delete-search-btn {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.delete-search-btn:hover {
+  opacity: 1;
 }
 
 .search-result-header:hover {
@@ -217,6 +298,10 @@ function handleDeleteSearchResult(searchId, resultIndex) {
 .search-term {
   flex: 1;
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .search-time {
@@ -252,6 +337,8 @@ function handleDeleteSearchResult(searchId, resultIndex) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 600px;
+  flex: 0 0 auto;
 }
 
 .match-message :deep(.highlight) {

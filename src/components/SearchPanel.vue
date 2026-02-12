@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { invoke } from '@tauri-apps/api/core'
 import {
   Search, Operation, Grid, Memo, List,
-  Plus, Delete
+  Plus, Delete, Bottom
 } from '@element-plus/icons-vue'
 
 const emit = defineEmits(['search-results-updated'])
@@ -21,6 +21,7 @@ const props = defineProps({
 const searchState = reactive({
   simpleTerm: '',
   isRegexMode: false,
+  isCaseSensitive: false,
   isAdvancedMode: false,
   conditions: [
     { id: Date.now() + '_1', term: '', operator: 'AND' }
@@ -57,6 +58,10 @@ function toggleRegexMode() {
   searchState.isRegexMode = !searchState.isRegexMode
 }
 
+function toggleCaseSensitive() {
+  searchState.isCaseSensitive = !searchState.isCaseSensitive
+}
+
 function toggleAdvancedMode() {
   searchState.isAdvancedMode = !searchState.isAdvancedMode
 }
@@ -71,6 +76,7 @@ async function executeSimpleSearch() {
       searchType: 'simple',
       searchTerm: searchState.simpleTerm,
       isRegex: searchState.isRegexMode,
+      caseSensitive: searchState.isCaseSensitive,
       sessionId: props.sessionId
     })
 
@@ -116,6 +122,7 @@ async function executeAdvancedSearch() {
       searchType: 'advanced',
       conditions: conditionsCopy,  // Use deep copy instead of reference
       isRegex: searchState.isRegexMode,
+      caseSensitive: searchState.isCaseSensitive,
       sessionId: props.sessionId
     })
 
@@ -173,8 +180,20 @@ function displaySearchTerm(search) {
   if (search.request.type === 'simple') {
     return search.request.term
   } else {
-    return search.request.conditions.map(c => c.term).join(' ') +
-           search.request.conditions.map(c => c.operator).join(' ') + ' '
+    // Show terms with operators between them
+    const parts = []
+    for (let i = 0; i < search.request.conditions.length; i++) {
+      const cond = search.request.conditions[i]
+      parts.push(`"${cond.term}"`)
+      if (i < search.request.conditions.length - 1) {
+        // Add the operator from the NEXT condition (which connects current and next)
+        const nextCond = search.request.conditions[i + 1]
+        if (nextCond && nextCond.operator) {
+          parts.push(nextCond.operator)
+        }
+      }
+    }
+    return parts.join(' ')
   }
 }
 
@@ -196,7 +215,8 @@ function highlightMatch(message, searchRequest) {
   patterns.forEach(pattern => {
     if (searchState.isRegexMode) {
       try {
-        const regex = new RegExp(`(${pattern})`, 'gi')
+        const flags = searchState.isCaseSensitive ? 'g' : 'gi'
+        const regex = new RegExp(`(${pattern})`, flags)
         highlighted = highlighted.replace(regex, '<span class="highlight">$1</span>')
       } catch (e) {
         // Invalid regex, skip highlighting
@@ -204,7 +224,8 @@ function highlightMatch(message, searchRequest) {
     } else {
       // Escape special regex characters for safe string matching
       const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      const regex = new RegExp(`(${escaped})`, 'gi')
+      const flags = searchState.isCaseSensitive ? 'g' : 'gi'
+      const regex = new RegExp(`(${escaped})`, flags)
       highlighted = highlighted.replace(regex, '<span class="highlight">$1</span>')
     }
   })
@@ -232,6 +253,16 @@ function highlightMatch(message, searchRequest) {
             class="search-icon-btn">
             <Operation v-if="!searchState.isRegexMode" />
             <Grid v-else />
+          </el-icon>
+        </el-tooltip>
+
+        <!-- Case sensitive toggle button -->
+        <el-tooltip content="区别大小写" placement="top">
+          <el-icon
+            :class="{ 'case-sensitive-active': searchState.isCaseSensitive }"
+            @click="toggleCaseSensitive"
+            class="search-icon-btn">
+            <Bottom />
           </el-icon>
         </el-tooltip>
 
@@ -271,7 +302,8 @@ function highlightMatch(message, searchRequest) {
               v-model="condition.term"
               placeholder="输入搜索条件..."
               :prefix-icon="Search"
-              clearable />
+              clearable
+              @keyup.enter="executeAdvancedSearch" />
 
             <!-- Delete button -->
             <el-button
@@ -308,10 +340,11 @@ function highlightMatch(message, searchRequest) {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  position: relative;
 }
 
 .search-input {
-  width: 400px;
+  width: 500px;
 }
 
 .search-icon-btn {
@@ -326,12 +359,21 @@ function highlightMatch(message, searchRequest) {
 }
 
 .regex-active,
-.advanced-active {
+.advanced-active,
+.case-sensitive-active {
   color: var(--el-color-primary);
 }
 
 .advanced-search-panel {
-  margin-top: 12px;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 8px;
+  z-index: 9999;
+  background: var(--el-bg-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .search-condition-row {
